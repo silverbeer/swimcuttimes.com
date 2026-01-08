@@ -34,9 +34,7 @@ class SwimTimeDAO(BaseDAO[SwimTime]):
         )
         return [self._to_model(row) for row in result.data]
 
-    def find_by_swimmer_and_event(
-        self, swimmer_id: UUID, event_id: UUID
-    ) -> list[SwimTime]:
+    def find_by_swimmer_and_event(self, swimmer_id: UUID, event_id: UUID) -> list[SwimTime]:
         """Find all times for a swimmer in a specific event.
 
         Args:
@@ -153,9 +151,7 @@ class SwimTimeDAO(BaseDAO[SwimTime]):
 
         return list(best_by_event.values())
 
-    def find_by_date_range(
-        self, swimmer_id: UUID, start: date, end: date
-    ) -> list[SwimTime]:
+    def find_by_date_range(self, swimmer_id: UUID, start: date, end: date) -> list[SwimTime]:
         """Find times for a swimmer within a date range.
 
         Args:

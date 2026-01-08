@@ -82,9 +82,7 @@ class MeetDAO(BaseDAO[Meet]):
         Returns:
             List of Meets sanctioned by that body
         """
-        result = (
-            self.table.select("*").eq("sanctioning_body", sanctioning_body).execute()
-        )
+        result = self.table.select("*").eq("sanctioning_body", sanctioning_body).execute()
         return [self._to_model(row) for row in result.data]
 
     def find_by_location(self, city: str | None = None, state: str | None = None) -> list[Meet]:

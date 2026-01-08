@@ -56,15 +56,24 @@ class Event(BaseModel):
 
     @model_validator(mode="after")
     def validate_distance_course(self) -> "Event":
-        """Validate that distance is valid for the course type."""
+        """Validate that distance is valid for the course type.
+
+        Note: Distance equivalents (500y/400m, 1000y/800m, 1650y/1500m) only apply
+        to freestyle events. IM events use the same distances across all courses
+        (e.g., 400 IM exists in SCY, SCM, and LCM).
+        """
+        # Only validate distance equivalents for freestyle
+        if self.stroke != Stroke.FREESTYLE:
+            return self
+
         if self.course == Course.SCY and self.distance in METERS_ONLY_DISTANCES:
             raise ValueError(
-                f"{self.distance} is a meters distance, not valid for SCY. "
+                f"{self.distance} is a meters distance, not valid for SCY freestyle. "
                 f"SCY equivalent: {METERS_TO_SCY_DISTANCE[self.distance]}"
             )
         if self.course in (Course.SCM, Course.LCM) and self.distance in SCY_ONLY_DISTANCES:
             raise ValueError(
-                f"{self.distance} is a yards distance, not valid for {self.course.value.upper()}. "
+                f"{self.distance} is a yards distance, not valid for {self.course.value.upper()} freestyle. "
                 f"Meters equivalent: {SCY_TO_METERS_DISTANCE[self.distance]}"
             )
         return self

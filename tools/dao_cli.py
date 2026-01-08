@@ -106,18 +106,14 @@ def ts_search(
     course: Annotated[
         str | None, typer.Option("--course", "-c", help="Course (scy, scm, lcm)")
     ] = None,
-    gender: Annotated[
-        str | None, typer.Option("--gender", "-g", help="Gender (M, F)")
-    ] = None,
+    gender: Annotated[str | None, typer.Option("--gender", "-g", help="Gender (M, F)")] = None,
     age_group: Annotated[
         str | None, typer.Option("--age", "-a", help="Age group (e.g., 11-12, 15-18)")
     ] = None,
     sanctioning_body: Annotated[
         str | None, typer.Option("--body", "-b", help="Sanctioning body")
     ] = None,
-    standard_name: Annotated[
-        str | None, typer.Option("--name", "-n", help="Standard name")
-    ] = None,
+    standard_name: Annotated[str | None, typer.Option("--name", "-n", help="Standard name")] = None,
     limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 100,
 ):
     """Search time standards with filters."""
@@ -240,12 +236,8 @@ def ts_by_body(
 
 @events_app.command("list")
 def events_list(
-    stroke: Annotated[
-        str | None, typer.Option("--stroke", "-s", help="Filter by stroke")
-    ] = None,
-    course: Annotated[
-        str | None, typer.Option("--course", "-c", help="Filter by course")
-    ] = None,
+    stroke: Annotated[str | None, typer.Option("--stroke", "-s", help="Filter by stroke")] = None,
+    course: Annotated[str | None, typer.Option("--course", "-c", help="Filter by course")] = None,
     limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 50,
 ):
     """List events."""

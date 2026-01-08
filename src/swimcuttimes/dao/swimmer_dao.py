@@ -72,9 +72,7 @@ class SwimmerDAO(BaseDAO[Swimmer]):
         Returns:
             The Swimmer or None if not found
         """
-        result = (
-            self.table.select("*").eq("usa_swimming_id", usa_swimming_id).execute()
-        )
+        result = self.table.select("*").eq("usa_swimming_id", usa_swimming_id).execute()
 
         if not result.data:
             return None
@@ -110,12 +108,8 @@ class SwimmerDAO(BaseDAO[Swimmer]):
             as_of_date = date.today()
 
         # Calculate birth date range
-        max_birth_date = date(
-            as_of_date.year - min_age, as_of_date.month, as_of_date.day
-        )
-        min_birth_date = date(
-            as_of_date.year - max_age - 1, as_of_date.month, as_of_date.day
-        )
+        max_birth_date = date(as_of_date.year - min_age, as_of_date.month, as_of_date.day)
+        min_birth_date = date(as_of_date.year - max_age - 1, as_of_date.month, as_of_date.day)
 
         result = (
             self.table.select("*")

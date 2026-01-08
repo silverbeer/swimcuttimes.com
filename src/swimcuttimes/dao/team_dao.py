@@ -62,9 +62,7 @@ class TeamDAO(BaseDAO[Team]):
         Returns:
             List of Teams under that sanctioning body
         """
-        result = (
-            self.table.select("*").eq("sanctioning_body", sanctioning_body).execute()
-        )
+        result = self.table.select("*").eq("sanctioning_body", sanctioning_body).execute()
         return [self._to_model(row) for row in result.data]
 
     def find_by_division(self, division: str) -> list[Team]:
@@ -144,9 +142,7 @@ class SwimmerTeamDAO(BaseDAO[SwimmerTeam]):
         Returns:
             List of SwimmerTeam associations (all time)
         """
-        result = (
-            self.table.select("*").eq("swimmer_id", str(swimmer_id)).execute()
-        )
+        result = self.table.select("*").eq("swimmer_id", str(swimmer_id)).execute()
         return [self._to_model(row) for row in result.data]
 
     def find_current_by_swimmer(self, swimmer_id: UUID) -> list[SwimmerTeam]:
@@ -188,16 +184,11 @@ class SwimmerTeamDAO(BaseDAO[SwimmerTeam]):
             List of current SwimmerTeam associations
         """
         result = (
-            self.table.select("*")
-            .eq("team_id", str(team_id))
-            .is_("end_date", "null")
-            .execute()
+            self.table.select("*").eq("team_id", str(team_id)).is_("end_date", "null").execute()
         )
         return [self._to_model(row) for row in result.data]
 
-    def find_by_swimmer_and_team(
-        self, swimmer_id: UUID, team_id: UUID
-    ) -> list[SwimmerTeam]:
+    def find_by_swimmer_and_team(self, swimmer_id: UUID, team_id: UUID) -> list[SwimmerTeam]:
         """Find all associations between a specific swimmer and team.
 
         Args:
@@ -215,9 +206,7 @@ class SwimmerTeamDAO(BaseDAO[SwimmerTeam]):
         )
         return [self._to_model(row) for row in result.data]
 
-    def find_active_on_date(
-        self, swimmer_id: UUID, target_date: date
-    ) -> list[SwimmerTeam]:
+    def find_active_on_date(self, swimmer_id: UUID, target_date: date) -> list[SwimmerTeam]:
         """Find team associations active on a specific date.
 
         Args:
@@ -246,11 +235,7 @@ class SwimmerTeamDAO(BaseDAO[SwimmerTeam]):
         Returns:
             The updated SwimmerTeam or None if not found
         """
-        result = (
-            self.table.update({"end_date": end_date.isoformat()})
-            .eq("id", str(id))
-            .execute()
-        )
+        result = self.table.update({"end_date": end_date.isoformat()}).eq("id", str(id)).execute()
 
         if not result.data:
             return None
