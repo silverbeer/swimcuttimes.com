@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
-    "fastapi>=0.115",
-    "uvicorn>=0.34",
+    "pydantic-settings>=2.0",
+    "fastapi[standard]>=0.115",
     "typer>=0.15",
     "rich>=13.0",
     "httpx>=0.28",
@@ -24,6 +24,9 @@ dev = [
     "pytest-asyncio>=0.25",
     "ruff>=0.9",
 ]
+
+[project.scripts]
+swimcuttimes = "swimcuttimes.cli:main"
 
 [build-system]
 requires = ["hatchling"]

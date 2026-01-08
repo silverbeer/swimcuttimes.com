@@ -183,7 +183,7 @@ class TimeStandardParser:
                 f"Response start: {response_text[:300]}\n"
                 f"Response end: {response_text[-300:]}\n"
                 f"Stop reason: {message.stop_reason}"
-            )
+            ) from e
 
         # Convert to our models
         entries = []

@@ -17,6 +17,18 @@ from swimcuttimes.models.time_standard import (
     format_centiseconds_to_time,
     parse_time_to_centiseconds,
 )
+from swimcuttimes.models.user import (
+    FanFollow,
+    FollowInvite,
+    FollowRequest,
+    FollowResponse,
+    FollowStatus,
+    Invitation,
+    InvitationCreate,
+    InvitationStatus,
+    UserProfile,
+    UserRole,
+)
 
 __all__ = [
     # Event
@@ -44,4 +56,15 @@ __all__ = [
     "TimeStandard",
     "format_centiseconds_to_time",
     "parse_time_to_centiseconds",
+    # User
+    "FanFollow",
+    "FollowInvite",
+    "FollowRequest",
+    "FollowResponse",
+    "FollowStatus",
+    "Invitation",
+    "InvitationCreate",
+    "InvitationStatus",
+    "UserProfile",
+    "UserRole",
 ]

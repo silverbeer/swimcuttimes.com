@@ -30,16 +30,10 @@ class TimeStandardDAO(BaseDAO[TimeStandard]):
         Returns:
             List of TimeStandards for that event
         """
-        result = (
-            self.table.select("*, events(*)")
-            .eq("event_id", str(event_id))
-            .execute()
-        )
+        result = self.table.select("*, events(*)").eq("event_id", str(event_id)).execute()
         return [self._to_model(row) for row in result.data]
 
-    def find_by_event_and_gender(
-        self, event_id: UUID, gender: Gender
-    ) -> list[TimeStandard]:
+    def find_by_event_and_gender(self, event_id: UUID, gender: Gender) -> list[TimeStandard]:
         """Find time standards for a specific event and gender.
 
         Args:
@@ -67,9 +61,7 @@ class TimeStandardDAO(BaseDAO[TimeStandard]):
             List of TimeStandards from that body
         """
         result = (
-            self.table.select("*, events(*)")
-            .eq("sanctioning_body", sanctioning_body)
-            .execute()
+            self.table.select("*, events(*)").eq("sanctioning_body", sanctioning_body).execute()
         )
         return [self._to_model(row) for row in result.data]
 
@@ -82,11 +74,7 @@ class TimeStandardDAO(BaseDAO[TimeStandard]):
         Returns:
             List of TimeStandards with that name
         """
-        result = (
-            self.table.select("*, events(*)")
-            .eq("standard_name", standard_name)
-            .execute()
-        )
+        result = self.table.select("*, events(*)").eq("standard_name", standard_name).execute()
         return [self._to_model(row) for row in result.data]
 
     def find_by_age_group(self, age_group: str | None) -> list[TimeStandard]:
@@ -117,11 +105,7 @@ class TimeStandardDAO(BaseDAO[TimeStandard]):
         Returns:
             List of TimeStandards for that year
         """
-        result = (
-            self.table.select("*, events(*)")
-            .eq("effective_year", year)
-            .execute()
-        )
+        result = self.table.select("*, events(*)").eq("effective_year", year).execute()
         return [self._to_model(row) for row in result.data]
 
     def find_standards_for_swimmer(

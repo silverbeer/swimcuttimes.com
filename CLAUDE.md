@@ -9,7 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Development
 uv sync                    # Install dependencies
-uv run fastapi dev         # Run API dev server
+./scripts/api.sh start     # Start API server (background)
+./scripts/api.sh stop      # Stop API server
+./scripts/api.sh status    # Check API server status
+./scripts/api.sh logs      # Tail API server logs
 uv run python -m cli       # Run CLI
 
 # Quality
@@ -17,6 +20,12 @@ uv run ruff check .        # Lint
 uv run ruff format .       # Format
 uv run pytest              # Run tests
 uv run pytest --cov=src    # Run with coverage
+
+# Environment
+./scripts/env.sh local     # Switch to local Supabase
+./scripts/env.sh dev       # Switch to dev cloud
+./scripts/env.sh prod      # Switch to prod cloud
+./scripts/env.sh status    # Show current environment
 
 # Database
 ./scripts/db-init.sh       # Initialize local Supabase
@@ -30,6 +39,41 @@ uv run pytest --cov=src    # Run with coverage
 - **Service layer**: Business logic in services, not route handlers (enables testing)
 - **Dependency injection**: External services injected for easy mocking
 - **High test coverage**: Complex logic isolated into testable pure functions
+
+## Environment Configuration
+
+Three environments are supported: **local**, **dev**, and **prod**.
+
+**Setup:**
+1. Copy `.env.local.example` to `.env.local` and fill in local Supabase credentials
+2. Copy `.env.dev.example` to `.env.dev` with dev cloud credentials
+3. Copy `.env.prod.example` to `.env.prod` with prod cloud credentials
+
+**Switching environments:**
+```bash
+./scripts/env.sh local   # Local Supabase (supabase start)
+./scripts/env.sh dev     # Dev cloud database
+./scripts/env.sh prod    # Prod cloud database (prompts for confirmation)
+./scripts/env.sh status  # Show current active environment
+```
+
+**Configuration in code:**
+```python
+from swimcuttimes.config import settings
+
+# Access settings
+settings.supabase_url       # Database URL
+settings.environment        # "local", "development", "production"
+settings.is_local           # True if local environment
+settings.is_production      # True if production environment
+```
+
+**Files:**
+- `.env` - Active environment (not committed, created by scripts)
+- `.env.local` - Local secrets (not committed)
+- `.env.dev` - Dev secrets (not committed)
+- `.env.prod` - Prod secrets (not committed)
+- `.env.*.example` - Templates (committed)
 
 ## Handling Warnings
 
