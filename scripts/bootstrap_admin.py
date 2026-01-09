@@ -5,15 +5,15 @@ This script bypasses the invitation system to create the initial admin.
 Run this once after setting up the database.
 
 Usage:
-    uv run python scripts/bootstrap_admin.py
+    cd backend && uv run python ../scripts/bootstrap_admin.py
 """
 
 import os
 import sys
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add backend/src to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "backend" / "src"))
 
 from dotenv import load_dotenv
 

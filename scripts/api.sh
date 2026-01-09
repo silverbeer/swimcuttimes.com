@@ -10,6 +10,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+BACKEND_DIR="$PROJECT_ROOT/backend"
 PID_FILE="$PROJECT_ROOT/.api.pid"
 LOG_FILE="$PROJECT_ROOT/.api.log"
 APP_PATH="src/swimcuttimes/api/app.py"
@@ -44,7 +45,7 @@ do_start() {
     fi
 
     echo "Starting API server..."
-    cd "$PROJECT_ROOT"
+    cd "$BACKEND_DIR"
     nohup uv run fastapi dev "$APP_PATH" > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
     sleep 1
@@ -99,6 +100,40 @@ do_status() {
     else
         echo "API server is not running"
         rm -f "$PID_FILE" 2>/dev/null || true
+    fi
+
+    # Show environment info
+    local env_file="$PROJECT_ROOT/.env"
+    if [ -f "$env_file" ]; then
+        local env_name
+        env_name=$(grep -E "^ENVIRONMENT=" "$env_file" 2>/dev/null | cut -d= -f2)
+        local supabase_url
+        supabase_url=$(grep -E "^SUPABASE_URL=" "$env_file" 2>/dev/null | cut -d= -f2)
+
+        echo ""
+        echo "Environment:"
+        if [ -n "$env_name" ]; then
+            echo "  Config: $env_name"
+        else
+            echo "  Config: not set"
+        fi
+        if [ -n "$supabase_url" ]; then
+            echo "  Supabase: $supabase_url"
+            # Determine Studio URL
+            if [[ "$supabase_url" == *"127.0.0.1"* ]] || [[ "$supabase_url" == *"localhost"* ]]; then
+                echo "  Studio: http://127.0.0.1:54323"
+            else
+                # Extract project ref from cloud URL (e.g., https://abcdefgh.supabase.co)
+                local project_ref
+                project_ref=$(echo "$supabase_url" | sed -E 's|https://([^.]+)\.supabase\.co.*|\1|')
+                if [ -n "$project_ref" ] && [ "$project_ref" != "$supabase_url" ]; then
+                    echo "  Studio: https://supabase.com/dashboard/project/$project_ref"
+                fi
+            fi
+        fi
+    else
+        echo ""
+        echo "Environment: .env not found (run ./scripts/env.sh local)"
     fi
 }
 
