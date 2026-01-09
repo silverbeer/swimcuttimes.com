@@ -17,6 +17,7 @@ from swimcuttimes.api.routes import (
     auth_router,
     follows_router,
     health_router,
+    teams_router,
     time_standards_router,
 )
 from swimcuttimes.config import get_settings
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(follows_router, prefix="/api/v1")
+    app.include_router(teams_router, prefix="/api/v1")
     app.include_router(time_standards_router, prefix="/api/v1")
 
     return app
