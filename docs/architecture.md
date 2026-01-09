@@ -14,17 +14,22 @@
 ## Project Structure
 
 ```
-src/
-├── api/              # FastAPI application
-│   ├── routes/       # API endpoints
-│   └── dependencies/ # DI and middleware
-├── models/           # Pydantic models for swim data
-├── cli/              # Typer CLI application
-└── parser/           # Image parsing tool (defines data model)
-scripts/              # DB init, migrate, seed scripts
-tests/                # Pytest tests (mirrors src/ structure)
-supabase/             # Supabase local config & migrations
-docs/                 # Project documentation
+.
+├── backend/                  # Python backend
+│   ├── src/swimcuttimes/     # Application source
+│   │   ├── api/              # FastAPI application
+│   │   │   ├── routes/       # API endpoints
+│   │   │   └── dependencies/ # DI and middleware
+│   │   ├── models/           # Pydantic models
+│   │   └── cli/              # Typer CLI application
+│   ├── tests/                # Pytest tests (mirrors src/)
+│   ├── tools/                # Development tools
+│   ├── data/                 # Data files (time standards)
+│   └── pyproject.toml        # Python dependencies
+├── frontend/                 # Frontend (Nuxt 3 - future)
+├── supabase/                 # Database config & migrations
+├── scripts/                  # Shared shell scripts
+└── docs/                     # Project documentation
 ```
 
 ## Design Principles
@@ -59,3 +64,70 @@ Single source of truth for data structures:
 - Used in database operations
 - Used in CLI input/output
 - Used in parser output
+
+## Database Migrations
+
+Migrations are stored in `supabase/migrations/` and committed to the repository. The migration workflow depends on whether you're creating new migrations or applying existing ones.
+
+### Applying Migrations (Pull from Main)
+
+When migration files have been added to the repo and you need to apply them to your local Supabase:
+
+```bash
+# 1. Pull latest changes from main
+git pull origin main
+
+# 2. Check migration status (see which migrations are pending)
+./scripts/db.sh status
+
+# 3. Apply pending migrations (non-destructive)
+./scripts/db.sh migrate
+
+# 4. Verify in Studio
+./scripts/api.sh status  # Shows Studio URL
+```
+
+### Full Database Reset
+
+If you need a clean slate (applies all migrations + seeds):
+
+```bash
+# WARNING: This destroys all local data (local environment only)
+./scripts/db.sh reset
+```
+
+### Creating New Migrations
+
+When you've made schema changes that need to be captured:
+
+```bash
+# Option 1: Generate migration from diff (if you made changes in Studio)
+npx supabase db diff -f <migration_name>
+
+# Option 2: Create empty migration file to write manually
+npx supabase migration new <migration_name>
+
+# Then edit the file in supabase/migrations/
+```
+
+### Migration File Naming
+
+Files are named with timestamp prefix: `YYYYMMDDHHMMSS_description.sql`
+
+Example: `20260108100000_auth_user_profiles.sql`
+
+### Troubleshooting
+
+```bash
+# Check Supabase services status
+npx supabase status
+
+# View migration history
+./scripts/db.sh status
+
+# Repair migration history (if out of sync, local)
+npx supabase migration repair --status applied <version> --local
+
+# Repair migration history (if out of sync, remote)
+npx supabase migration repair --status applied <version>
+```

@@ -6,7 +6,10 @@
 
 ## Commands
 
+Run from the `backend/` directory:
+
 ```bash
+cd backend
 uv run pytest                              # Run all tests
 uv run pytest -k "test_name"               # Run specific test
 uv run pytest tests/parser/                # Run tests in directory
@@ -18,9 +21,9 @@ uv run pytest -v                           # Verbose output
 
 ## Test Structure
 
-Tests mirror the source structure:
+Tests mirror the source structure (in `backend/tests/`):
 ```
-tests/
+backend/tests/
 ├── api/          # API route tests
 ├── models/       # Pydantic model tests
 ├── parser/       # Image parser tests
@@ -51,7 +54,7 @@ For API endpoints using FastAPI TestClient:
 Example:
 ```python
 from fastapi.testclient import TestClient
-from src.api.main import app
+from swimcuttimes.api.app import app
 
 client = TestClient(app)
 

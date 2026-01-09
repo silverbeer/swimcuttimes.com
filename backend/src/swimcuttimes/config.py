@@ -13,16 +13,31 @@ Environment files:
     - .env.prod  - Production (Supabase Cloud prod project)
 
 Switch environments:
-    ./scripts/use-local.sh
-    ./scripts/use-dev.sh
-    ./scripts/use-prod.sh
+    ./scripts/env.sh local
+    ./scripts/env.sh dev
+    ./scripts/env.sh prod
 """
 
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _find_env_file() -> Path | None:
+    """Find .env file, checking both current dir and project root."""
+    # Check current directory first
+    if Path(".env").exists():
+        return Path(".env")
+    # Check project root (parent of backend/)
+    # config.py -> swimcuttimes -> src -> backend -> project_root
+    project_root = Path(__file__).parent.parent.parent.parent
+    env_file = project_root / ".env"
+    if env_file.exists():
+        return env_file
+    return None
 
 
 class Environment(StrEnum):
@@ -44,11 +59,11 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables.
 
     Settings are loaded from .env file in the project root.
-    Use ./scripts/use-*.sh to switch between environments.
+    Use ./scripts/env.sh to switch between environments.
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_find_env_file(),
         env_file_encoding="utf-8",
         case_sensitive=False,
     )

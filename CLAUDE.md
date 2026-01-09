@@ -7,30 +7,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Stack**: FastAPI + Pydantic, Supabase (PostgreSQL), Typer + Rich CLI, uv + pyproject.toml
 
 ```bash
-# Development
+# Backend development (run from backend/)
+cd backend
 uv sync                    # Install dependencies
-./scripts/api.sh start     # Start API server (background)
-./scripts/api.sh stop      # Stop API server
-./scripts/api.sh status    # Check API server status
-./scripts/api.sh logs      # Tail API server logs
 uv run python -m cli       # Run CLI
-
-# Quality
 uv run ruff check .        # Lint
 uv run ruff format .       # Format
 uv run pytest              # Run tests
 uv run pytest --cov=src    # Run with coverage
 
-# Environment
+# API server (run from project root)
+./scripts/api.sh start     # Start API server (background)
+./scripts/api.sh stop      # Stop API server
+./scripts/api.sh status    # Check API server status
+./scripts/api.sh logs      # Tail API server logs
+
+# Environment (run from project root)
 ./scripts/env.sh local     # Switch to local Supabase
 ./scripts/env.sh dev       # Switch to dev cloud
 ./scripts/env.sh prod      # Switch to prod cloud
 ./scripts/env.sh status    # Show current environment
 
-# Database
-./scripts/db-init.sh       # Initialize local Supabase
-./scripts/db-migrate.sh    # Run migrations
-./scripts/db-seed.sh       # Seed data
+# Database (run from project root, environment-aware)
+./scripts/db.sh status    # Show migration status
+./scripts/db.sh migrate   # Apply pending migrations
+./scripts/db.sh reset     # Reset DB (local only, migrations + seed)
+./scripts/db.sh start     # Start local Supabase
+./scripts/db.sh stop      # Stop local Supabase
+```
+
+## Project Structure
+
+```
+.
+├── backend/              # Python backend (FastAPI + CLI)
+│   ├── src/swimcuttimes/ # Application source code
+│   ├── tests/            # Pytest tests
+│   ├── tools/            # Development tools
+│   ├── data/             # Data files (time standards)
+│   └── pyproject.toml    # Python dependencies
+├── frontend/             # Frontend (Nuxt 3 - future)
+├── supabase/             # Database config & migrations
+├── scripts/              # Shared shell scripts
+└── docs/                 # Documentation
 ```
 
 ## Key Principles
