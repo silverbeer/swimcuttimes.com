@@ -16,6 +16,7 @@ from fastapi import Depends
 from supabase import Client, create_client
 from swimcuttimes.config import Settings, get_settings
 from swimcuttimes.dao.event_dao import EventDAO
+from swimcuttimes.dao.team_dao import TeamDAO
 from swimcuttimes.dao.time_standard_dao import TimeStandardDAO
 
 
@@ -49,10 +50,16 @@ def get_event_dao(client: SupabaseDep) -> EventDAO:
     return EventDAO(client)
 
 
+def get_team_dao(client: SupabaseDep) -> TeamDAO:
+    """Get TeamDAO instance."""
+    return TeamDAO(client)
+
+
 def get_time_standard_dao(client: SupabaseDep) -> TimeStandardDAO:
     """Get TimeStandardDAO instance."""
     return TimeStandardDAO(client)
 
 
 EventDAODep = Annotated[EventDAO, Depends(get_event_dao)]
+TeamDAODep = Annotated[TeamDAO, Depends(get_team_dao)]
 TimeStandardDAODep = Annotated[TimeStandardDAO, Depends(get_time_standard_dao)]

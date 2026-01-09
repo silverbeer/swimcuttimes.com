@@ -89,6 +89,82 @@ class TeamDAO(BaseDAO[Team]):
         result = self.table.select("*").eq("state", state).execute()
         return [self._to_model(row) for row in result.data]
 
+    def search(
+        self,
+        name: str | None = None,
+        team_type: TeamType | None = None,
+        sanctioning_body: str | None = None,
+        lsc: str | None = None,
+        division: str | None = None,
+        state: str | None = None,
+        country: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Team]:
+        """Search teams with optional filters.
+
+        Args:
+            name: Partial name match (case-insensitive)
+            team_type: Filter by team type
+            sanctioning_body: Filter by sanctioning body
+            lsc: Filter by LSC code
+            division: Filter by division
+            state: Filter by state
+            country: Filter by country
+            limit: Maximum results to return
+            offset: Number of results to skip
+
+        Returns:
+            List of matching Teams
+        """
+        query = self.table.select("*")
+
+        if name:
+            query = query.ilike("name", f"%{name}%")
+        if team_type:
+            query = query.eq("team_type", team_type.value)
+        if sanctioning_body:
+            query = query.eq("sanctioning_body", sanctioning_body)
+        if lsc:
+            query = query.eq("lsc", lsc)
+        if division:
+            query = query.eq("division", division)
+        if state:
+            query = query.eq("state", state)
+        if country:
+            query = query.eq("country", country)
+
+        result = query.range(offset, offset + limit - 1).execute()
+        return [self._to_model(row) for row in result.data]
+
+    def partial_update(self, id: UUID, updates: dict) -> Team | None:
+        """Update specific fields of a team.
+
+        Args:
+            id: Team UUID
+            updates: Dictionary of field names to new values
+
+        Returns:
+            Updated Team or None if not found
+        """
+        # Filter out None values
+        data = {k: v for k, v in updates.items() if v is not None}
+
+        if not data:
+            # No updates provided, return current team
+            return self.get_by_id(id)
+
+        # Convert enums to values
+        if "team_type" in data and isinstance(data["team_type"], TeamType):
+            data["team_type"] = data["team_type"].value
+
+        result = self.table.update(data).eq("id", str(id)).execute()
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
+
     def _to_model(self, row: dict) -> Team:
         """Convert database row to Team model."""
         return Team(

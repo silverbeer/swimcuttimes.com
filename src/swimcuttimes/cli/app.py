@@ -668,6 +668,303 @@ def invite_revoke(
 
 
 # =============================================================================
+# TEAMS COMMANDS
+# =============================================================================
+
+teams_app = typer.Typer(help="Team management", no_args_is_help=True)
+app.add_typer(teams_app, name="teams")
+
+
+@teams_app.command("list")
+def teams_list(
+    name: str = typer.Option(None, "--name", "-n", help="Filter by name (partial match)"),
+    team_type: str = typer.Option(
+        None, "--type", "-t", help="Filter by type (club/high_school/college/national/olympic)"
+    ),
+    lsc: str = typer.Option(None, "--lsc", help="Filter by LSC code (e.g., NE, PV)"),
+    state: str = typer.Option(None, "--state", "-s", help="Filter by state"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
+):
+    """List teams with optional filters."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Build query params
+    params = []
+    if name:
+        params.append(f"name={name}")
+    if team_type:
+        params.append(f"team_type={team_type}")
+    if lsc:
+        params.append(f"lsc={lsc}")
+    if state:
+        params.append(f"state={state}")
+    params.append(f"limit={limit}")
+
+    query = "&".join(params)
+    path = f"/api/v1/teams?{query}"
+
+    with console.status("Fetching teams..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    teams = response.json()
+
+    if not teams:
+        console.print("[yellow]No teams found[/yellow]")
+        return
+
+    table = Table(title=f"Teams ({len(teams)})")
+    table.add_column("ID", style="dim")
+    table.add_column("Name", style="cyan")
+    table.add_column("Type")
+    table.add_column("Sanctioning Body")
+    table.add_column("LSC/Division/State")
+
+    for team in teams:
+        team_type_val = team.get("team_type", "")
+        type_color = {
+            "club": "blue",
+            "high_school": "green",
+            "college": "magenta",
+            "national": "yellow",
+            "olympic": "red",
+        }.get(team_type_val, "white")
+
+        # Show relevant field based on team type
+        extra = team.get("lsc") or team.get("division") or team.get("state") or "-"
+
+        table.add_row(
+            team["id"][:8] + "...",
+            team["name"],
+            f"[{type_color}]{team_type_val}[/{type_color}]",
+            team.get("sanctioning_body", "-"),
+            extra,
+        )
+
+    console.print(table)
+
+
+@teams_app.command("get")
+def teams_get(
+    team_id: str = typer.Argument(..., help="Team ID"),
+):
+    """Get details for a specific team."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    with console.status("Fetching team..."):
+        response = cli_auth.api_request("GET", f"/api/v1/teams/{team_id}")
+
+    if response.status_code == 404:
+        console.print("[red]Team not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    team = response.json()
+
+    table = Table(title="Team Details")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+
+    table.add_row("ID", team["id"])
+    table.add_row("Name", team["name"])
+    table.add_row("Type", team["team_type"])
+    table.add_row("Sanctioning Body", team.get("sanctioning_body", "-"))
+    table.add_row("LSC", team.get("lsc") or "-")
+    table.add_row("Division", team.get("division") or "-")
+    table.add_row("State", team.get("state") or "-")
+    table.add_row("Country", team.get("country") or "-")
+
+    console.print(table)
+
+
+@teams_app.command("create")
+def teams_create(
+    name: str = typer.Option(..., "--name", "-n", help="Team name"),
+    team_type: str = typer.Option(
+        ..., "--type", "-t", help="Team type (club/high_school/college/national/olympic)"
+    ),
+    sanctioning_body: str = typer.Option(
+        ..., "--sanctioning-body", "-b", help="Sanctioning body (e.g., USA Swimming, NCAA)"
+    ),
+    lsc: str = typer.Option(None, "--lsc", help="LSC code for club teams (e.g., NE, PV)"),
+    division: str = typer.Option(None, "--division", "-d", help="Division for college teams"),
+    state: str = typer.Option(None, "--state", "-s", help="State for high school teams"),
+    country: str = typer.Option(None, "--country", "-c", help="Country for national/olympic teams"),
+):
+    """Create a new team (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    payload = {
+        "name": name,
+        "team_type": team_type,
+        "sanctioning_body": sanctioning_body,
+    }
+    if lsc:
+        payload["lsc"] = lsc
+    if division:
+        payload["division"] = division
+    if state:
+        payload["state"] = state
+    if country:
+        payload["country"] = country
+
+    with console.status("Creating team..."):
+        response = cli_auth.api_request("POST", "/api/v1/teams", json_data=payload)
+
+    if response.status_code == 400:
+        err = response.json()
+        console.print(f"[red]Validation error: {err.get('detail', response.text)}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Team name already exists')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    team = response.json()
+    console.print("[green]Team created![/green]")
+    console.print(f"ID: {team['id']}")
+    console.print(f"Name: {team['name']}")
+
+
+@teams_app.command("update")
+def teams_update(
+    team_id: str = typer.Argument(..., help="Team ID to update"),
+    name: str = typer.Option(None, "--name", "-n", help="New team name"),
+    sanctioning_body: str = typer.Option(
+        None, "--sanctioning-body", "-b", help="New sanctioning body"
+    ),
+    lsc: str = typer.Option(None, "--lsc", help="New LSC code"),
+    division: str = typer.Option(None, "--division", "-d", help="New division"),
+    state: str = typer.Option(None, "--state", "-s", help="New state"),
+    country: str = typer.Option(None, "--country", "-c", help="New country"),
+):
+    """Update a team (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    payload = {}
+    if name:
+        payload["name"] = name
+    if sanctioning_body:
+        payload["sanctioning_body"] = sanctioning_body
+    if lsc:
+        payload["lsc"] = lsc
+    if division:
+        payload["division"] = division
+    if state:
+        payload["state"] = state
+    if country:
+        payload["country"] = country
+
+    if not payload:
+        console.print("[yellow]No updates provided[/yellow]")
+        raise typer.Exit(1)
+
+    with console.status("Updating team..."):
+        response = cli_auth.api_request("PATCH", f"/api/v1/teams/{team_id}", json_data=payload)
+
+    if response.status_code == 404:
+        console.print("[red]Team not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 400:
+        err = response.json()
+        console.print(f"[red]Validation error: {err.get('detail', response.text)}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Team name already exists')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    team = response.json()
+    console.print("[green]Team updated![/green]")
+    console.print(f"Name: {team['name']}")
+
+
+@teams_app.command("delete")
+def teams_delete(
+    team_id: str = typer.Argument(..., help="Team ID to delete"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a team (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Get team info first
+    with console.status("Fetching team..."):
+        response = cli_auth.api_request("GET", f"/api/v1/teams/{team_id}")
+
+    if response.status_code == 404:
+        console.print("[red]Team not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    team = response.json()
+
+    if not force and not typer.confirm(f"Delete team '{team['name']}'?"):
+        console.print("[yellow]Cancelled[/yellow]")
+        raise typer.Exit(0)
+
+    with console.status("Deleting team..."):
+        response = cli_auth.api_request("DELETE", f"/api/v1/teams/{team_id}")
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 204:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Team '{team['name']}' deleted[/green]")
+
+
+# =============================================================================
 # USERS COMMANDS (Admin only)
 # =============================================================================
 
