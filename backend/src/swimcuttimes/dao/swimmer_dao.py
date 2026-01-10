@@ -119,6 +119,38 @@ class SwimmerDAO(BaseDAO[Swimmer]):
         )
         return [self._to_model(row) for row in result.data]
 
+    def partial_update(self, id: UUID, updates: dict) -> Swimmer | None:
+        """Update specific fields of a swimmer.
+
+        Args:
+            id: Swimmer UUID
+            updates: Dictionary of field names to new values
+
+        Returns:
+            Updated Swimmer or None if not found
+        """
+        # Filter out None values
+        data = {k: v for k, v in updates.items() if v is not None}
+
+        if not data:
+            # No updates provided, return current swimmer
+            return self.get_by_id(id)
+
+        # Convert types for database
+        if "date_of_birth" in data and isinstance(data["date_of_birth"], date):
+            data["date_of_birth"] = data["date_of_birth"].isoformat()
+        if "gender" in data and isinstance(data["gender"], Gender):
+            data["gender"] = data["gender"].value
+        if "user_id" in data and isinstance(data["user_id"], UUID):
+            data["user_id"] = str(data["user_id"])
+
+        result = self.table.update(data).eq("id", str(id)).execute()
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
+
     def search(
         self,
         name: str | None = None,

@@ -1,9 +1,13 @@
 """Authentication and invitation endpoints."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
+from supabase_auth.types import (
+    SignInWithEmailAndPasswordCredentials,
+    SignUpWithEmailAndPasswordCredentials,
+)
 from pydantic import BaseModel, EmailStr
 
 from swimcuttimes import get_logger
@@ -105,17 +109,16 @@ async def signup(request: SignupRequest, client: SupabaseDep) -> AuthResponse:
 
     # Create user in Supabase Auth
     try:
-        auth_response = client.auth.sign_up(
-            {
-                "email": request.email,
-                "password": request.password,
-                "options": {
-                    "data": {
-                        "display_name": request.display_name or request.email.split("@")[0],
-                    }
-                },
-            }
-        )
+        credentials: SignUpWithEmailAndPasswordCredentials = {
+            "email": request.email,
+            "password": request.password,
+            "options": {
+                "data": {
+                    "display_name": request.display_name or request.email.split("@")[0],
+                }
+            },
+        }
+        auth_response = client.auth.sign_up(credentials)
     except Exception as e:
         logger.error("signup_failed", error=str(e), email=request.email)
         raise HTTPException(
@@ -123,7 +126,7 @@ async def signup(request: SignupRequest, client: SupabaseDep) -> AuthResponse:
             detail="Failed to create account",
         ) from e
 
-    if not auth_response.user:
+    if not auth_response.user or not auth_response.session:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Failed to create account",
@@ -145,7 +148,7 @@ async def signup(request: SignupRequest, client: SupabaseDep) -> AuthResponse:
         {
             "status": "accepted",
             "accepted_by": user_id,
-            "accepted_at": datetime.utcnow().isoformat(),
+            "accepted_at": datetime.now(timezone.utc).isoformat(),
         }
     ).eq("id", invitation["id"]).execute()
 
@@ -175,9 +178,11 @@ async def signup(request: SignupRequest, client: SupabaseDep) -> AuthResponse:
 async def login(request: LoginRequest, client: SupabaseDep) -> AuthResponse:
     """Login with email and password."""
     try:
-        auth_response = client.auth.sign_in_with_password(
-            {"email": request.email, "password": request.password}
-        )
+        credentials: SignInWithEmailAndPasswordCredentials = {
+            "email": request.email,
+            "password": request.password,
+        }
+        auth_response = client.auth.sign_in_with_password(credentials)
     except Exception as e:
         logger.warning("login_failed", email=request.email, error=str(e))
         raise HTTPException(

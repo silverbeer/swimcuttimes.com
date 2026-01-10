@@ -1,6 +1,15 @@
 """Tests for Team API endpoints."""
 
+import pytest
 from fastapi.testclient import TestClient
+
+from swimcuttimes.config import get_settings
+
+# Skip tests if service_role key is not configured (RLS blocks operations)
+pytestmark = pytest.mark.skipif(
+    get_settings().supabase_service_role_key is None,
+    reason="SUPABASE_SERVICE_ROLE_KEY not configured - tests require service role to bypass RLS",
+)
 
 
 class TestTeamCRUD:
