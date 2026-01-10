@@ -4,6 +4,7 @@ from datetime import date
 from uuid import UUID
 
 from supabase import Client
+
 from swimcuttimes.dao.base import BaseDAO
 from swimcuttimes.models.swimmer import Gender, Swimmer
 

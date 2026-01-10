@@ -8,7 +8,7 @@ from swimcuttimes.models.event import (
     Event,
     Stroke,
 )
-from swimcuttimes.models.meet import Meet, MeetType
+from swimcuttimes.models.meet import Meet, MeetTeam, MeetType
 from swimcuttimes.models.swim_time import Round, Split, SwimTime
 from swimcuttimes.models.swimmer import Gender, Swimmer
 from swimcuttimes.models.team import SwimmerTeam, Team, TeamType
@@ -40,6 +40,7 @@ __all__ = [
     "VALID_DISTANCES",
     # Meet
     "Meet",
+    "MeetTeam",
     "MeetType",
     # Swim Time
     "Round",

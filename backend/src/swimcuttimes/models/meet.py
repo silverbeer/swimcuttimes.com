@@ -47,3 +47,16 @@ class Meet(BaseModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+class MeetTeam(BaseModel):
+    """Association between a meet and a participating team.
+
+    Tracks which teams participate in a meet. A team can be marked
+    as host for home meets.
+    """
+
+    id: UUID | None = None
+    meet_id: UUID
+    team_id: UUID
+    is_host: bool = False

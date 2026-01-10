@@ -1561,6 +1561,797 @@ def swimmers_unassign(
 
 
 # =============================================================================
+# MEETS COMMANDS
+# =============================================================================
+
+meets_app = typer.Typer(help="Meet management", no_args_is_help=True)
+app.add_typer(meets_app, name="meets")
+
+
+def _resolve_meet(identifier: str) -> dict:
+    """Resolve a meet by ID (partial UUID) or name.
+
+    Args:
+        identifier: Either a partial UUID (min 8 chars) or exact meet name
+
+    Returns:
+        Meet dict from API
+
+    Raises:
+        typer.Exit: If meet not found or ambiguous
+    """
+    import re
+
+    # Check if it looks like a UUID (hex chars, possibly with dashes)
+    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+
+    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+        # Try partial UUID match - fetch all meets and filter
+        response = cli_auth.api_request("GET", "/api/v1/meets?limit=500")
+        if response.status_code != 200:
+            console.print(f"[red]Error fetching meets: {response.text}[/red]")
+            raise typer.Exit(1)
+
+        meets = response.json()
+        matches = [m for m in meets if m["id"].startswith(identifier.lower())]
+
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            console.print(f"[red]Ambiguous ID '{identifier}' matches {len(matches)} meets:[/red]")
+            for m in matches[:5]:
+                console.print(f"  {m['id'][:8]}  {m['name']}")
+            raise typer.Exit(1)
+        # Fall through to try name match
+
+    # Try exact name match
+    response = cli_auth.api_request("GET", f"/api/v1/meets?name={identifier}&limit=10")
+    if response.status_code != 200:
+        console.print(f"[red]Error searching meets: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    meets = response.json()
+    # Look for exact name match (API does partial match)
+    exact_matches = [m for m in meets if m["name"].lower() == identifier.lower()]
+
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    elif len(exact_matches) > 1:
+        console.print(f"[red]Multiple meets match '{identifier}'[/red]")
+        raise typer.Exit(1)
+
+    # Try partial name match if no exact match
+    if len(meets) == 1:
+        return meets[0]
+
+    # No match found
+    console.print(f"[red]Meet not found: '{identifier}'[/red]")
+    console.print("[dim]Use a partial UUID (min 8 chars) or meet name[/dim]")
+    raise typer.Exit(1)
+
+
+@meets_app.command("list")
+def meets_list(
+    name: str = typer.Option(None, "--name", "-n", help="Filter by name (partial match)"),
+    course: str = typer.Option(None, "--course", "-c", help="Filter by course (scy/scm/lcm)"),
+    meet_type: str = typer.Option(
+        None, "--type", "-t", help="Filter by type (championship/invitational/dual/time_trial)"
+    ),
+    after: str = typer.Option(None, "--after", help="Only meets starting after this date (YYYY-MM-DD)"),
+    before: str = typer.Option(None, "--before", help="Only meets starting before this date (YYYY-MM-DD)"),
+    limit: int = typer.Option(50, "--limit", help="Max results"),
+):
+    """List meets with optional filters."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Build query params
+    params = []
+    if name:
+        params.append(f"name={name}")
+    if course:
+        params.append(f"course={course.lower()}")
+    if meet_type:
+        params.append(f"meet_type={meet_type}")
+    if after:
+        params.append(f"start_after={after}")
+    if before:
+        params.append(f"start_before={before}")
+    params.append(f"limit={limit}")
+
+    query = "&".join(params)
+    path = f"/api/v1/meets?{query}"
+
+    with console.status("Fetching meets..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    meets = response.json()
+
+    if not meets:
+        console.print("[yellow]No meets found[/yellow]")
+        return
+
+    table = Table(title=f"Meets ({len(meets)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Date", no_wrap=True)
+    table.add_column("Course", style="magenta", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+
+    for meet in meets:
+        type_color = {
+            "championship": "green",
+            "invitational": "blue",
+            "dual": "yellow",
+            "time_trial": "dim",
+        }.get(meet.get("meet_type", ""), "white")
+
+        table.add_row(
+            meet["id"][:8],
+            meet["name"],
+            meet.get("start_date", "-"),
+            meet.get("course", "-").upper(),
+            f"[{type_color}]{meet.get('meet_type', '-')}[/{type_color}]",
+        )
+
+    console.print(table)
+
+
+@meets_app.command("get")
+def meets_get(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+):
+    """Get details for a specific meet."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    with console.status("Fetching meet..."):
+        meet = _resolve_meet(meet_ref)
+
+    table = Table(title="Meet Details")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+
+    table.add_row("ID", meet["id"])
+    table.add_row("Name", meet["name"])
+    table.add_row("Location", meet.get("location", "-"))
+    table.add_row("City", meet.get("city", "-"))
+    table.add_row("State", meet.get("state") or "-")
+    table.add_row("Start Date", meet.get("start_date", "-"))
+    table.add_row("End Date", meet.get("end_date") or "-")
+    table.add_row("Course", meet.get("course", "-").upper())
+    table.add_row("Lanes", str(meet.get("lanes", "-")))
+    table.add_row("Indoor", "Yes" if meet.get("indoor") else "No")
+    table.add_row("Meet Type", meet.get("meet_type", "-"))
+    table.add_row("Sanctioning Body", meet.get("sanctioning_body", "-"))
+
+    console.print(table)
+
+
+@meets_app.command("create")
+def meets_create(
+    name: str = typer.Option(..., "--name", "-n", help="Meet name"),
+    location: str = typer.Option(..., "--location", "-l", help="Venue name"),
+    city: str = typer.Option(..., "--city", help="City"),
+    course: str = typer.Option(..., "--course", "-c", help="Course (scy/scm/lcm)"),
+    start_date: str = typer.Option(..., "--date", "-d", help="Start date (YYYY-MM-DD)"),
+    meet_type: str = typer.Option(
+        ..., "--type", "-t", help="Meet type (championship/invitational/dual/time_trial)"
+    ),
+    sanctioning_body: str = typer.Option(
+        ..., "--sanctioning-body", "-b", help="Sanctioning body (e.g., USA Swimming, MIAA)"
+    ),
+    state: str = typer.Option(None, "--state", "-s", help="State"),
+    lanes: int = typer.Option(6, "--lanes", help="Number of lanes (6/8/10)"),
+    indoor: bool = typer.Option(True, "--indoor/--outdoor", help="Indoor or outdoor"),
+):
+    """Create a new meet (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    payload = {
+        "name": name,
+        "location": location,
+        "city": city,
+        "course": course.lower(),
+        "start_date": start_date,
+        "meet_type": meet_type,
+        "sanctioning_body": sanctioning_body,
+        "lanes": lanes,
+        "indoor": indoor,
+    }
+    if state:
+        payload["state"] = state
+
+    with console.status("Creating meet..."):
+        response = cli_auth.api_request("POST", "/api/v1/meets", json_data=payload)
+
+    if response.status_code == 400:
+        err = response.json()
+        console.print(f"[red]Validation error: {err.get('detail', response.text)}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Meet name already exists')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    meet = response.json()
+    console.print("[green]Meet created![/green]")
+    console.print(f"ID: {meet['id'][:8]}")
+    console.print(f"Name: {meet['name']}")
+
+
+@meets_app.command("update")
+def meets_update(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+    name: str = typer.Option(None, "--name", "-n", help="New meet name"),
+    location: str = typer.Option(None, "--location", "-l", help="New venue name"),
+    city: str = typer.Option(None, "--city", help="New city"),
+    state: str = typer.Option(None, "--state", "-s", help="New state"),
+    course: str = typer.Option(None, "--course", "-c", help="New course (scy/scm/lcm)"),
+    lanes: int = typer.Option(None, "--lanes", help="New number of lanes"),
+):
+    """Update a meet (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve meet first
+    with console.status("Finding meet..."):
+        meet = _resolve_meet(meet_ref)
+    meet_id = meet["id"]
+
+    payload = {}
+    if name:
+        payload["name"] = name
+    if location:
+        payload["location"] = location
+    if city:
+        payload["city"] = city
+    if state:
+        payload["state"] = state
+    if course:
+        payload["course"] = course.lower()
+    if lanes:
+        payload["lanes"] = lanes
+
+    if not payload:
+        console.print("[yellow]No updates provided[/yellow]")
+        raise typer.Exit(1)
+
+    with console.status("Updating meet..."):
+        response = cli_auth.api_request("PATCH", f"/api/v1/meets/{meet_id}", json_data=payload)
+
+    if response.status_code == 404:
+        console.print("[red]Meet not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 400:
+        err = response.json()
+        console.print(f"[red]Validation error: {err.get('detail', response.text)}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    meet = response.json()
+    console.print("[green]Meet updated![/green]")
+    console.print(f"Name: {meet['name']}")
+
+
+@meets_app.command("delete")
+def meets_delete(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a meet (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve meet first
+    with console.status("Finding meet..."):
+        meet = _resolve_meet(meet_ref)
+    meet_id = meet["id"]
+
+    if not force and not typer.confirm(f"Delete meet '{meet['name']}'?"):
+        console.print("[yellow]Cancelled[/yellow]")
+        raise typer.Exit(0)
+
+    with console.status("Deleting meet..."):
+        response = cli_auth.api_request("DELETE", f"/api/v1/meets/{meet_id}")
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 204:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Meet '{meet['name']}' deleted[/green]")
+
+
+@meets_app.command("teams")
+def meets_teams(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+):
+    """List teams participating in a meet."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve meet first
+    with console.status("Finding meet..."):
+        meet = _resolve_meet(meet_ref)
+    meet_id = meet["id"]
+    meet_name = meet["name"]
+
+    with console.status("Fetching teams..."):
+        response = cli_auth.api_request("GET", f"/api/v1/meets/{meet_id}/teams")
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    teams = response.json()
+
+    if not teams:
+        console.print(f"[yellow]No teams registered for '{meet_name}'[/yellow]")
+        return
+
+    table = Table(title=f"Teams in {meet_name}")
+    table.add_column("Team", style="cyan", no_wrap=True)
+    table.add_column("Host", no_wrap=True)
+
+    for team in teams:
+        host_status = "[green]Yes[/green]" if team.get("is_host") else "-"
+        table.add_row(
+            team.get("team_name", "-"),
+            host_status,
+        )
+
+    console.print(table)
+
+
+@meets_app.command("add-team")
+def meets_add_team(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+    team_ref: str = typer.Argument(..., help="Team ID (partial) or name"),
+    host: bool = typer.Option(False, "--host", "-h", help="Mark as host team"),
+):
+    """Add a team to a meet (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve meet and team
+    with console.status("Finding meet and team..."):
+        meet = _resolve_meet(meet_ref)
+        team = _resolve_team(team_ref)
+
+    meet_id = meet["id"]
+    team_id = team["id"]
+    meet_name = meet["name"]
+    team_name = team["name"]
+
+    payload = {"team_id": team_id, "is_host": host}
+
+    with console.status("Adding team to meet..."):
+        response = cli_auth.api_request("POST", f"/api/v1/meets/{meet_id}/teams", json_data=payload)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 404:
+        console.print("[red]Meet or team not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Team already in meet')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    host_str = " as host" if host else ""
+    console.print(f"[green]{team_name} added to {meet_name}{host_str}[/green]")
+
+
+@meets_app.command("remove-team")
+def meets_remove_team(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+    team_ref: str = typer.Argument(..., help="Team ID (partial) or name"),
+):
+    """Remove a team from a meet (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve meet and team
+    with console.status("Finding meet and team..."):
+        meet = _resolve_meet(meet_ref)
+        team = _resolve_team(team_ref)
+
+    meet_id = meet["id"]
+    team_id = team["id"]
+    meet_name = meet["name"]
+    team_name = team["name"]
+
+    with console.status("Removing team from meet..."):
+        response = cli_auth.api_request("DELETE", f"/api/v1/meets/{meet_id}/teams/{team_id}")
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 404:
+        console.print("[red]Team is not in this meet[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 204:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]{team_name} removed from {meet_name}[/green]")
+
+
+# =============================================================================
+# TIMES COMMANDS
+# =============================================================================
+
+times_app = typer.Typer(help="Swim time management", no_args_is_help=True)
+app.add_typer(times_app, name="times")
+
+
+def _parse_event(event_str: str) -> tuple[int, str, str]:
+    """Parse an event string like '100 free scy' into (distance, stroke, course).
+
+    Args:
+        event_str: Event string in format "DISTANCE STROKE COURSE"
+                   e.g., "100 free scy", "200 back lcm", "500 fly"
+
+    Returns:
+        Tuple of (distance, stroke, course)
+
+    Raises:
+        ValueError: If event string is invalid
+    """
+    parts = event_str.lower().split()
+    if len(parts) < 2:
+        raise ValueError("Event must be in format 'DISTANCE STROKE [COURSE]', e.g., '100 free scy'")
+
+    # Parse distance
+    try:
+        distance = int(parts[0])
+    except ValueError:
+        raise ValueError(f"Invalid distance: {parts[0]}") from None
+
+    # Parse stroke
+    stroke_map = {
+        "free": "freestyle",
+        "freestyle": "freestyle",
+        "back": "backstroke",
+        "backstroke": "backstroke",
+        "breast": "breaststroke",
+        "breaststroke": "breaststroke",
+        "fly": "butterfly",
+        "butterfly": "butterfly",
+        "im": "im",
+    }
+    stroke = stroke_map.get(parts[1])
+    if not stroke:
+        raise ValueError(f"Invalid stroke: {parts[1]}. Use free/back/breast/fly/im")
+
+    # Parse course (optional, default to scy)
+    course = "scy"
+    if len(parts) >= 3:
+        course = parts[2].lower()
+        if course not in ("scy", "scm", "lcm"):
+            raise ValueError(f"Invalid course: {parts[2]}. Use scy/scm/lcm")
+
+    return distance, stroke, course
+
+
+def _find_event_id(distance: int, stroke: str, course: str) -> str | None:
+    """Find the event ID for a given distance/stroke/course combination.
+
+    Args:
+        distance: Event distance
+        stroke: Event stroke
+        course: Pool course
+
+    Returns:
+        Event ID or None if not found
+    """
+    # The events table is reference data - we need to look it up
+    # For now, we'll create the event on the fly via swim_times API
+    # which handles event resolution
+    return None
+
+
+@times_app.command("list")
+def times_list(
+    swimmer: str = typer.Option(None, "--swimmer", "-s", help="Filter by swimmer (ID or name)"),
+    meet: str = typer.Option(None, "--meet", "-m", help="Filter by meet (ID or name)"),
+    event: str = typer.Option(None, "--event", "-e", help="Filter by event (e.g., '100 free scy')"),
+    team: str = typer.Option(None, "--team", "-t", help="Filter by team (ID or name)"),
+    limit: int = typer.Option(50, "--limit", help="Max results"),
+):
+    """List swim times with optional filters."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Build query params
+    params = []
+
+    # Resolve swimmer ID if provided
+    if swimmer:
+        with console.status("Finding swimmer..."):
+            swimmer_data = _resolve_swimmer(swimmer)
+        params.append(f"swimmer_id={swimmer_data['id']}")
+
+    # Resolve meet ID if provided
+    if meet:
+        with console.status("Finding meet..."):
+            meet_data = _resolve_meet(meet)
+        params.append(f"meet_id={meet_data['id']}")
+
+    # Resolve team ID if provided
+    if team:
+        with console.status("Finding team..."):
+            team_data = _resolve_team(team)
+        params.append(f"team_id={team_data['id']}")
+
+    params.append(f"limit={limit}")
+
+    query = "&".join(params)
+    path = f"/api/v1/swim-times?{query}"
+
+    with console.status("Fetching times..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    times = response.json()
+
+    if not times:
+        console.print("[yellow]No swim times found[/yellow]")
+        return
+
+    table = Table(title=f"Swim Times ({len(times)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Time", style="green", no_wrap=True)
+    table.add_column("Date", no_wrap=True)
+    table.add_column("Round", no_wrap=True)
+
+    for time in times:
+        table.add_row(
+            time["id"][:8],
+            time.get("time_formatted", "-"),
+            time.get("swim_date", "-"),
+            time.get("round") or "-",
+        )
+
+    console.print(table)
+
+
+@times_app.command("record")
+def times_record(
+    swimmer: str = typer.Option(..., "--swimmer", "-s", help="Swimmer ID or name"),
+    meet: str = typer.Option(..., "--meet", "-m", help="Meet ID or name"),
+    event: str = typer.Option(..., "--event", "-e", help="Event (e.g., '100 free scy')"),
+    time: str = typer.Option(..., "--time", "-t", help="Time (e.g., '1:05.23' or '32.45')"),
+    team: str = typer.Option(..., "--team", help="Team ID or name"),
+    date: str = typer.Option(..., "--date", "-d", help="Swim date (YYYY-MM-DD)"),
+    round_name: str = typer.Option(None, "--round", "-r", help="Round (prelims/finals/consolation/time_trial)"),
+    lane: int = typer.Option(None, "--lane", help="Lane number (1-10)"),
+    place: int = typer.Option(None, "--place", help="Finish place"),
+):
+    """Record a swim time (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Parse event
+    try:
+        distance, stroke, course = _parse_event(event)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer, meet, team
+    with console.status("Resolving references..."):
+        swimmer_data = _resolve_swimmer(swimmer)
+        meet_data = _resolve_meet(meet)
+        team_data = _resolve_team(team)
+
+    swimmer_id = swimmer_data["id"]
+    meet_id = meet_data["id"]
+    team_id = team_data["id"]
+    swimmer_name = f"{swimmer_data['first_name']} {swimmer_data['last_name']}"
+
+    # Find or create event - for now we'll need to look up or create the event
+    # The API needs the event_id, so we need to find it first
+    # For simplicity, we'll use a simple approach: query events to find match
+    event_response = cli_auth.api_request(
+        "GET",
+        f"/api/v1/time-standards?stroke={stroke}&distance={distance}&course={course}&limit=1"
+    )
+    event_id = None
+
+    # If we can't find the event via time standards, we need another approach
+    # For now, let's assume the event exists and use a placeholder
+    # In a real implementation, we'd have an events API
+    console.print("[yellow]Note: Event lookup is simplified - event must already exist[/yellow]")
+
+    payload = {
+        "swimmer_id": swimmer_id,
+        "meet_id": meet_id,
+        "team_id": team_id,
+        "time_formatted": time,
+        "swim_date": date,
+    }
+
+    # We need event_id - for now, let's report this limitation
+    console.print("[red]Error: Recording times requires event_id. Event API not yet implemented.[/red]")
+    console.print("[dim]This feature will work once the events API is complete.[/dim]")
+    raise typer.Exit(1)
+
+
+@times_app.command("pbs")
+def times_pbs(
+    swimmer: str = typer.Argument(..., help="Swimmer ID or name"),
+):
+    """Show personal bests for a swimmer."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer
+    with console.status("Finding swimmer..."):
+        swimmer_data = _resolve_swimmer(swimmer)
+
+    swimmer_id = swimmer_data["id"]
+    swimmer_name = f"{swimmer_data['first_name']} {swimmer_data['last_name']}"
+
+    with console.status("Fetching personal bests..."):
+        response = cli_auth.api_request("GET", f"/api/v1/swimmers/{swimmer_id}/personal-bests")
+
+    if response.status_code == 404:
+        console.print("[red]Swimmer not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    times = response.json()
+
+    if not times:
+        console.print(f"[yellow]No times recorded for {swimmer_name}[/yellow]")
+        return
+
+    table = Table(title=f"Personal Bests for {swimmer_name}")
+    table.add_column("Time", style="green", no_wrap=True)
+    table.add_column("Date", no_wrap=True)
+
+    for time in times:
+        table.add_row(
+            time.get("time_formatted", "-"),
+            time.get("swim_date", "-"),
+        )
+
+    console.print(table)
+
+
+@times_app.command("compare")
+def times_compare(
+    time_id: str = typer.Argument(..., help="Swim time ID"),
+):
+    """Compare a swim time to personal best."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    with console.status("Analyzing time..."):
+        response = cli_auth.api_request("GET", f"/api/v1/swim-times/analysis/{time_id}")
+
+    if response.status_code == 404:
+        console.print("[red]Swim time not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    data = response.json()
+
+    table = Table(title="Time Analysis")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+
+    table.add_row("Time", data.get("time_formatted", "-"))
+    table.add_row("Date", data.get("swim_date", "-"))
+    table.add_row("Round", data.get("round") or "-")
+
+    if data.get("is_personal_best"):
+        table.add_row("Status", "[green bold]PERSONAL BEST![/green bold]")
+    else:
+        pb = data.get("personal_best")
+        if pb:
+            table.add_row("Personal Best", pb.get("time_formatted", "-"))
+            time_off = data.get("time_off_pb")
+            if time_off is not None:
+                if time_off > 0:
+                    table.add_row("Off PB", f"[red]+{time_off:.2f}s[/red]")
+                else:
+                    table.add_row("Off PB", f"[green]{time_off:.2f}s[/green]")
+
+            improvement = data.get("improvement_percentage")
+            if improvement is not None:
+                if improvement > 0:
+                    table.add_row("Improvement", f"[green]{improvement:.2f}%[/green]")
+                else:
+                    table.add_row("Improvement", f"[red]{improvement:.2f}%[/red]")
+        else:
+            table.add_row("Status", "[yellow]First time in this event[/yellow]")
+
+    console.print(table)
+
+
+# =============================================================================
 # USERS COMMANDS (Admin only)
 # =============================================================================
 

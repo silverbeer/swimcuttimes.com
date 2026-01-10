@@ -5,7 +5,6 @@ from typing import Generic, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
-
 from supabase import Client, create_client
 
 T = TypeVar("T", bound=BaseModel)
