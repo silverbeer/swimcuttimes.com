@@ -9,6 +9,7 @@ from swimcuttimes.models.event import (
     Stroke,
 )
 from swimcuttimes.models.meet import Meet, MeetType
+from swimcuttimes.models.suit import SuitCondition, SuitModel, SuitType, SwimmerSuit
 from swimcuttimes.models.swim_time import Round, Split, SwimTime
 from swimcuttimes.models.swimmer import Gender, Swimmer
 from swimcuttimes.models.team import SwimmerTeam, Team, TeamType
@@ -41,6 +42,11 @@ __all__ = [
     # Meet
     "Meet",
     "MeetType",
+    # Suit
+    "SuitCondition",
+    "SuitModel",
+    "SuitType",
+    "SwimmerSuit",
     # Swim Time
     "Round",
     "Split",

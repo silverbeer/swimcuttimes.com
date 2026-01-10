@@ -64,6 +64,7 @@ class SwimTime(BaseModel):
     # When and where
     swim_date: date
     team_id: UUID  # Team swimmer represented at time of swim
+    suit_id: UUID | None = None  # Racing suit worn during this swim (optional)
 
     # Competition details (optional)
     round: Round | None = None

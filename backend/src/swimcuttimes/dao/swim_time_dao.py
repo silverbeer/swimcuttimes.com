@@ -94,6 +94,59 @@ class SwimTimeDAO(BaseDAO[SwimTime]):
         result = self.table.select("*").eq("round", round.value).execute()
         return [self._to_model(row) for row in result.data]
 
+    def find_by_suit(self, suit_id: UUID) -> list[SwimTime]:
+        """Find all times recorded with a specific suit.
+
+        Args:
+            suit_id: The swimmer suit's UUID
+
+        Returns:
+            List of SwimTimes using that suit
+        """
+        result = (
+            self.table.select("*")
+            .eq("suit_id", str(suit_id))
+            .order("swim_date", desc=True)
+            .execute()
+        )
+        return [self._to_model(row) for row in result.data]
+
+    def find_times_with_suit(self, swimmer_id: UUID) -> list[SwimTime]:
+        """Find all times for a swimmer that have a suit recorded.
+
+        Args:
+            swimmer_id: The swimmer's UUID
+
+        Returns:
+            List of SwimTimes with suit_id set
+        """
+        result = (
+            self.table.select("*")
+            .eq("swimmer_id", str(swimmer_id))
+            .not_.is_("suit_id", "null")
+            .order("swim_date", desc=True)
+            .execute()
+        )
+        return [self._to_model(row) for row in result.data]
+
+    def find_times_without_suit(self, swimmer_id: UUID) -> list[SwimTime]:
+        """Find all times for a swimmer without a suit recorded.
+
+        Args:
+            swimmer_id: The swimmer's UUID
+
+        Returns:
+            List of SwimTimes without suit_id
+        """
+        result = (
+            self.table.select("*")
+            .eq("swimmer_id", str(swimmer_id))
+            .is_("suit_id", "null")
+            .order("swim_date", desc=True)
+            .execute()
+        )
+        return [self._to_model(row) for row in result.data]
+
     def find_personal_best(self, swimmer_id: UUID, event_id: UUID) -> SwimTime | None:
         """Find a swimmer's personal best (fastest time) for an event.
 
@@ -261,6 +314,7 @@ class SwimTimeDAO(BaseDAO[SwimTime]):
             time_centiseconds=row["time_centiseconds"],
             swim_date=date.fromisoformat(row["swim_date"]),
             team_id=UUID(row["team_id"]),
+            suit_id=UUID(row["suit_id"]) if row.get("suit_id") else None,
             round=Round(row["round"]) if row.get("round") else None,
             lane=row.get("lane"),
             place=row.get("place"),
@@ -284,6 +338,8 @@ class SwimTimeDAO(BaseDAO[SwimTime]):
 
         if model.id:
             data["id"] = str(model.id)
+        if model.suit_id:
+            data["suit_id"] = str(model.suit_id)
         if model.round:
             data["round"] = model.round.value
         if model.lane is not None:
