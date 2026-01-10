@@ -1616,6 +1616,576 @@ def users_list():
     console.print(table)
 
 
+# =============================================================================
+# SUITS COMMANDS
+# =============================================================================
+
+suits_app = typer.Typer(help="Racing suit management", no_args_is_help=True)
+app.add_typer(suits_app, name="suits")
+
+
+def _resolve_suit_model(identifier: str) -> dict:
+    """Resolve a suit model by ID (partial UUID) or brand+model name.
+
+    Args:
+        identifier: Either a partial UUID (min 8 chars) or "Brand Model" string
+
+    Returns:
+        SuitModel dict from API
+
+    Raises:
+        typer.Exit: If suit model not found or ambiguous
+    """
+    import re
+
+    # Check if it looks like a UUID (hex chars, possibly with dashes)
+    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+
+    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+        # Try partial UUID match - fetch all models and filter
+        response = cli_auth.api_request("GET", "/api/v1/suits/models?limit=500")
+        if response.status_code != 200:
+            console.print(f"[red]Error fetching suit models: {response.text}[/red]")
+            raise typer.Exit(1)
+
+        models = response.json()
+        matches = [m for m in models if m["id"].startswith(identifier.lower())]
+
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            msg = f"Ambiguous ID '{identifier}' matches {len(matches)} suit models:"
+            console.print(f"[red]{msg}[/red]")
+            for m in matches[:5]:
+                console.print(f"  {m['id'][:8]}  {m['brand']} {m['model_name']}")
+            raise typer.Exit(1)
+        # Fall through to try name match
+
+    # Try brand + model name match
+    response = cli_auth.api_request("GET", "/api/v1/suits/models?limit=500")
+    if response.status_code != 200:
+        console.print(f"[red]Error searching suit models: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    models = response.json()
+    id_lower = identifier.lower()
+
+    # Look for matches where identifier is in "brand model_name"
+    matches = []
+    for m in models:
+        full_name = f"{m['brand']} {m['model_name']}".lower()
+        if id_lower in full_name or full_name == id_lower:
+            matches.append(m)
+
+    if len(matches) == 1:
+        return matches[0]
+    elif len(matches) > 1:
+        # Check for exact match
+        exact = [m for m in matches if f"{m['brand']} {m['model_name']}".lower() == id_lower]
+        if len(exact) == 1:
+            return exact[0]
+        console.print(f"[red]Multiple suit models match '{identifier}':[/red]")
+        for m in matches[:5]:
+            console.print(f"  {m['id'][:8]}  {m['brand']} {m['model_name']}")
+        raise typer.Exit(1)
+
+    # No match found
+    console.print(f"[red]Suit model not found: '{identifier}'[/red]")
+    console.print("[dim]Use a partial UUID (min 8 chars) or brand+model name[/dim]")
+    raise typer.Exit(1)
+
+
+def _resolve_swimmer_suit(identifier: str) -> dict:
+    """Resolve a swimmer suit by ID (partial UUID) or nickname.
+
+    Args:
+        identifier: Either a partial UUID (min 8 chars) or nickname
+
+    Returns:
+        SwimmerSuit dict from API
+
+    Raises:
+        typer.Exit: If suit not found
+    """
+    import re
+
+    # For suits, we need to know the swimmer_id to fetch
+    # This function requires either a UUID or we search all suits
+    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+
+    if not is_uuid_like or len(identifier.replace('-', '')) < 8:
+        console.print("[red]Please provide a suit ID (at least 8 hex characters)[/red]")
+        console.print("[dim]Use 'suits inventory <swimmer>' to find suit IDs[/dim]")
+        raise typer.Exit(1)
+
+    # Try to get by full or partial ID
+    response = cli_auth.api_request("GET", f"/api/v1/suits/inventory/{identifier}")
+    if response.status_code == 200:
+        return response.json()
+
+    # If not found, might be partial - but we can't easily search all suits
+    console.print(f"[red]Suit not found: '{identifier}'[/red]")
+    console.print("[dim]Use 'suits inventory <swimmer>' to find suit IDs[/dim]")
+    raise typer.Exit(1)
+
+
+@suits_app.command("models")
+def suits_models(
+    brand: str = typer.Option(None, "--brand", "-b", help="Filter by brand"),
+    gender: str = typer.Option(None, "--gender", "-g", help="Filter by gender (M/F)"),
+    tech_only: bool = typer.Option(False, "--tech", help="Show only tech suits"),
+    regular_only: bool = typer.Option(False, "--regular", help="Show only regular racing suits"),
+    limit: int = typer.Option(50, "--limit", help="Max results"),
+):
+    """List racing suit models (catalog)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Build query params
+    params = []
+    if brand:
+        params.append(f"brand={brand}")
+    if gender:
+        params.append(f"gender={gender.upper()}")
+    if tech_only:
+        params.append("is_tech_suit=true")
+    elif regular_only:
+        params.append("is_tech_suit=false")
+    params.append(f"limit={limit}")
+
+    query = "&".join(params)
+    path = f"/api/v1/suits/models?{query}"
+
+    with console.status("Fetching suit models..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    models = response.json()
+
+    if not models:
+        console.print("[yellow]No suit models found[/yellow]")
+        return
+
+    table = Table(title=f"Racing Suit Catalog ({len(models)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Brand", style="cyan", no_wrap=True)
+    table.add_column("Model", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Category", no_wrap=True)
+    table.add_column("Gender", no_wrap=True)
+    table.add_column("MSRP", no_wrap=True)
+
+    for model in models:
+        category_color = "yellow" if model.get("is_tech_suit") else "green"
+        gender_color = "blue" if model.get("gender") == "M" else "magenta"
+
+        table.add_row(
+            model["id"][:8],
+            model["brand"],
+            model["model_name"],
+            model.get("suit_type", "-"),
+            f"[{category_color}]{model.get('suit_category', '-')}[/{category_color}]",
+            f"[{gender_color}]{model.get('gender', '-')}[/{gender_color}]",
+            model.get("msrp_formatted") or "-",
+        )
+
+    console.print(table)
+
+
+@suits_app.command("model-add")
+def suits_model_add(
+    brand: str = typer.Option(..., "--brand", "-b", help="Brand name (e.g., Speedo, Arena, TYR)"),
+    model_name: str = typer.Option(..., "--model", "-m", help="Model name (e.g., LZR Pure Intent)"),
+    suit_type: str = typer.Option(..., "--type", "-t", help="Suit type (jammer/kneeskin/brief)"),
+    gender: str = typer.Option(..., "--gender", "-g", help="Gender (M/F)"),
+    tech: bool = typer.Option(False, "--tech", help="Is this a tech suit?"),
+    msrp: int = typer.Option(None, "--msrp", help="MSRP in cents (e.g., 54900 for $549)"),
+    peak_races: int = typer.Option(None, "--peak-races", help="Expected races at peak performance"),
+    total_races: int = typer.Option(None, "--total-races", help="Expected total races"),
+):
+    """Add a new suit model to the catalog (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    payload = {
+        "brand": brand,
+        "model_name": model_name,
+        "suit_type": suit_type.lower(),
+        "gender": gender.upper(),
+        "is_tech_suit": tech,
+    }
+    if msrp:
+        payload["msrp_cents"] = msrp
+    if peak_races:
+        payload["expected_races_peak"] = peak_races
+    if total_races:
+        payload["expected_races_total"] = total_races
+
+    with console.status("Creating suit model..."):
+        response = cli_auth.api_request("POST", "/api/v1/suits/models", json_data=payload)
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    model = response.json()
+    console.print("[green]Suit model created![/green]")
+    console.print(f"ID: {model['id'][:8]}")
+    console.print(f"Name: {model['brand']} {model['model_name']}")
+    console.print(f"Category: {model['suit_category']}")
+
+
+@suits_app.command("inventory")
+def suits_inventory(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+    all_suits: bool = typer.Option(False, "--all", "-a", help="Include retired suits"),
+):
+    """List a swimmer's racing suit inventory."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # First resolve the swimmer
+    with console.status("Finding swimmer..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+    swimmer_id = swimmer["id"]
+    swimmer_name = f"{swimmer['first_name']} {swimmer['last_name']}"
+
+    # Fetch inventory
+    active_only = "false" if all_suits else "true"
+    path = f"/api/v1/suits/inventory?swimmer_id={swimmer_id}&active_only={active_only}"
+
+    with console.status("Fetching suit inventory..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    suits = response.json()
+
+    if not suits:
+        console.print(f"[yellow]No suits found for {swimmer_name}[/yellow]")
+        return
+
+    table = Table(title=f"Suit Inventory: {swimmer_name} ({len(suits)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Suit", style="cyan")
+    table.add_column("Nickname")
+    table.add_column("Size")
+    table.add_column("Races", no_wrap=True)
+    table.add_column("Life %", no_wrap=True)
+    table.add_column("Condition", no_wrap=True)
+
+    for suit in suits:
+        model = suit.get("suit_model", {})
+        model_name = f"{model.get('brand', '?')} {model.get('model_name', '?')}" if model else "-"
+
+        # Condition color
+        condition = suit.get("condition", "new")
+        cond_color = {
+            "new": "green",
+            "good": "cyan",
+            "worn": "yellow",
+            "retired": "dim",
+        }.get(condition, "white")
+
+        # Life percentage color
+        life_pct = suit.get("life_percentage")
+        if life_pct is not None:
+            if life_pct >= 100:
+                life_str = f"[red]{life_pct:.0f}%[/red]"
+            elif life_pct >= 75:
+                life_str = f"[yellow]{life_pct:.0f}%[/yellow]"
+            else:
+                life_str = f"[green]{life_pct:.0f}%[/green]"
+        else:
+            life_str = "-"
+
+        # Past peak indicator
+        past_peak = suit.get("is_past_peak")
+        race_str = str(suit.get("race_count", 0))
+        if past_peak:
+            race_str = f"[yellow]{race_str}*[/yellow]"
+
+        table.add_row(
+            suit["id"][:8],
+            model_name,
+            suit.get("nickname") or "-",
+            suit.get("size") or "-",
+            race_str,
+            life_str,
+            f"[{cond_color}]{condition}[/{cond_color}]",
+        )
+
+    console.print(table)
+    console.print("[dim]* = past peak performance[/dim]")
+
+
+@suits_app.command("add")
+def suits_add(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+    model_ref: str = typer.Argument(..., help="Suit model ID (partial) or brand+model name"),
+    nickname: str = typer.Option(None, "--nickname", "-n", help="Nickname for this suit"),
+    size: str = typer.Option(None, "--size", "-s", help="Size (e.g., 26, 28)"),
+    color: str = typer.Option(None, "--color", "-c", help="Color (e.g., Black/Gold)"),
+    price: int = typer.Option(None, "--price", "-p", help="Purchase price in cents"),
+    location: str = typer.Option(None, "--location", "-l", help="Where purchased"),
+    purchase_date: str = typer.Option(None, "--date", "-d", help="Purchase date (YYYY-MM-DD)"),
+):
+    """Add a suit to a swimmer's inventory (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer and suit model
+    with console.status("Finding swimmer..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+    swimmer_id = swimmer["id"]
+
+    with console.status("Finding suit model..."):
+        model = _resolve_suit_model(model_ref)
+    model_id = model["id"]
+
+    payload = {
+        "swimmer_id": swimmer_id,
+        "suit_model_id": model_id,
+    }
+    if nickname:
+        payload["nickname"] = nickname
+    if size:
+        payload["size"] = size
+    if color:
+        payload["color"] = color
+    if price:
+        payload["purchase_price_cents"] = price
+    if location:
+        payload["purchase_location"] = location
+    if purchase_date:
+        payload["purchase_date"] = purchase_date
+
+    with console.status("Adding suit to inventory..."):
+        response = cli_auth.api_request("POST", "/api/v1/suits/inventory", json_data=payload)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    suit = response.json()
+    console.print("[green]Suit added to inventory![/green]")
+    console.print(f"ID: {suit['id'][:8]}")
+    console.print(f"Swimmer: {swimmer['first_name']} {swimmer['last_name']}")
+    console.print(f"Suit: {model['brand']} {model['model_name']}")
+    if nickname:
+        console.print(f"Nickname: {nickname}")
+
+
+@suits_app.command("get")
+def suits_get(
+    suit_id: str = typer.Argument(..., help="Suit ID (full or partial)"),
+):
+    """Get details for a specific swimmer suit."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    with console.status("Fetching suit..."):
+        suit = _resolve_swimmer_suit(suit_id)
+
+    model = suit.get("suit_model", {})
+
+    table = Table(title="Suit Details")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+
+    table.add_row("ID", suit["id"])
+    model_name = f"{model.get('brand', '?')} {model.get('model_name', '?')}" if model else "-"
+    table.add_row("Suit Model", model_name)
+    table.add_row("Category", model.get("suit_category", "-") if model else "-")
+    table.add_row("Nickname", suit.get("nickname") or "-")
+    table.add_row("Size", suit.get("size") or "-")
+    table.add_row("Color", suit.get("color") or "-")
+    table.add_row("Condition", suit.get("condition", "-"))
+    table.add_row("", "")  # Spacer
+    table.add_row("Race Count", str(suit.get("race_count", 0)))
+    table.add_row("Wear Count", str(suit.get("wear_count", 0)))
+
+    life_pct = suit.get("life_percentage")
+    remaining = suit.get("remaining_races")
+    past_peak = suit.get("is_past_peak")
+
+    table.add_row("Life Used", f"{life_pct:.1f}%" if life_pct is not None else "-")
+    table.add_row("Remaining Races", str(remaining) if remaining is not None else "-")
+    table.add_row("Past Peak?", "Yes" if past_peak else "No")
+    table.add_row("", "")  # Spacer
+    table.add_row("Purchase Date", suit.get("purchase_date") or "-")
+    table.add_row("Purchase Price", suit.get("purchase_price_formatted") or "-")
+    table.add_row("Purchase Location", suit.get("purchase_location") or "-")
+
+    if suit.get("retired_date"):
+        table.add_row("", "")  # Spacer
+        table.add_row("Retired Date", suit.get("retired_date"))
+        table.add_row("Retirement Reason", suit.get("retirement_reason") or "-")
+
+    console.print(table)
+
+
+@suits_app.command("retire")
+def suits_retire(
+    suit_id: str = typer.Argument(..., help="Suit ID"),
+    reason: str = typer.Option(None, "--reason", "-r", help="Retirement reason"),
+    date: str = typer.Option(None, "--date", "-d", help="Retirement date (YYYY-MM-DD)"),
+):
+    """Retire a swimmer's suit (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # First verify the suit exists
+    with console.status("Finding suit..."):
+        suit = _resolve_swimmer_suit(suit_id)
+
+    if suit.get("condition") == "retired":
+        console.print("[yellow]Suit is already retired[/yellow]")
+        raise typer.Exit(0)
+
+    payload = {}
+    if reason:
+        payload["retirement_reason"] = reason
+    if date:
+        payload["retired_date"] = date
+
+    with console.status("Retiring suit..."):
+        url = f"/api/v1/suits/inventory/{suit['id']}/retire"
+        response = cli_auth.api_request("POST", url, json_data=payload)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    result = response.json()
+    console.print("[green]Suit retired![/green]")
+    console.print(f"Race count: {result.get('race_count', 0)}")
+    if reason:
+        console.print(f"Reason: {reason}")
+
+
+@suits_app.command("stats")
+def suits_stats(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+):
+    """Show suit statistics for a swimmer."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer
+    with console.status("Finding swimmer..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+    swimmer_id = swimmer["id"]
+    swimmer_name = f"{swimmer['first_name']} {swimmer['last_name']}"
+
+    # Fetch all suits (including retired)
+    path = f"/api/v1/suits/inventory?swimmer_id={swimmer_id}&active_only=false"
+
+    with console.status("Fetching suit inventory..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    suits = response.json()
+
+    if not suits:
+        console.print(f"[yellow]No suits found for {swimmer_name}[/yellow]")
+        return
+
+    # Calculate stats
+    total_suits = len(suits)
+    active_suits = [s for s in suits if s.get("condition") != "retired"]
+    retired_suits = [s for s in suits if s.get("condition") == "retired"]
+    tech_suits = [s for s in suits if s.get("suit_model", {}).get("is_tech_suit")]
+    regular_suits = [s for s in suits if not s.get("suit_model", {}).get("is_tech_suit")]
+
+    total_races = sum(s.get("race_count", 0) for s in suits)
+    tech_races = sum(s.get("race_count", 0) for s in tech_suits)
+    regular_races = sum(s.get("race_count", 0) for s in regular_suits)
+
+    total_spent = sum(s.get("purchase_price_cents", 0) or 0 for s in suits)
+    tech_spent = sum(s.get("purchase_price_cents", 0) or 0 for s in tech_suits)
+
+    console.print()
+    console.print(f"[bold cyan]Suit Statistics: {swimmer_name}[/bold cyan]")
+    console.print()
+
+    table = Table(show_header=False, box=None)
+    table.add_column("Label", style="dim")
+    table.add_column("Value", style="bold")
+
+    table.add_row("Total Suits", str(total_suits))
+    table.add_row("  Active", str(len(active_suits)))
+    table.add_row("  Retired", str(len(retired_suits)))
+    table.add_row("", "")
+    table.add_row("Tech Suits", str(len(tech_suits)))
+    table.add_row("Regular Racing Suits", str(len(regular_suits)))
+    table.add_row("", "")
+    table.add_row("Total Races in Suits", str(total_races))
+    table.add_row("  Races in Tech Suits", str(tech_races))
+    table.add_row("  Races in Regular Suits", str(regular_races))
+    table.add_row("", "")
+    table.add_row("Total Investment", f"${total_spent / 100:.2f}" if total_spent else "-")
+    table.add_row("  Tech Suit Investment", f"${tech_spent / 100:.2f}" if tech_spent else "-")
+
+    if total_races > 0 and total_spent > 0:
+        cost_per_race = total_spent / total_races / 100
+        table.add_row("  Cost per Race", f"${cost_per_race:.2f}")
+
+    console.print(table)
+
+    # Show suits needing attention
+    worn_suits = [s for s in active_suits if s.get("is_past_peak")]
+    if worn_suits:
+        console.print()
+        console.print("[yellow]Suits past peak performance:[/yellow]")
+        for s in worn_suits:
+            model = s.get("suit_model", {})
+            name = f"{model.get('brand', '?')} {model.get('model_name', '?')}"
+            nickname = f" ({s['nickname']})" if s.get("nickname") else ""
+            console.print(f"  - {name}{nickname}: {s.get('race_count', 0)} races")
+
+
 def main():
     """Entry point for CLI."""
     app()
