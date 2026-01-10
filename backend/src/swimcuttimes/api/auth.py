@@ -141,6 +141,19 @@ def require_admin(user: CurrentUser) -> UserProfile:
 AdminUser = Annotated[UserProfile, Depends(require_admin)]
 
 
+def require_admin_or_coach(user: CurrentUser) -> UserProfile:
+    """Shorthand dependency for routes allowing admin or coach access."""
+    if user.role not in (UserRole.ADMIN, UserRole.COACH):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or coach access required",
+        )
+    return user
+
+
+AdminOrCoachUser = Annotated[UserProfile, Depends(require_admin_or_coach)]
+
+
 async def get_optional_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     client: SupabaseDep,

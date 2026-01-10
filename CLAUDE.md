@@ -59,6 +59,48 @@ uv run pytest --cov=src    # Run with coverage
 - **Dependency injection**: External services injected for easy mocking
 - **High test coverage**: Complex logic isolated into testable pure functions
 
+## Supabase Row Level Security (RLS)
+
+**CRITICAL**: All tables in the `public` schema MUST have Row Level Security enabled.
+
+When creating new tables in migrations:
+
+1. **Always enable RLS** immediately after creating the table:
+   ```sql
+   CREATE TABLE my_table (...);
+   ALTER TABLE my_table ENABLE ROW LEVEL SECURITY;
+   ```
+
+2. **Always add RLS policies** for the table. Common patterns:
+   ```sql
+   -- Public read access (for public data like swim times, meets, teams)
+   CREATE POLICY "Table is publicly readable"
+       ON my_table FOR SELECT
+       USING (true);
+
+   -- Admin/coach write access
+   CREATE POLICY "Admins and coaches can create"
+       ON my_table FOR INSERT
+       WITH CHECK (is_admin() OR is_coach());
+
+   -- User-owned data
+   CREATE POLICY "Users can update own records"
+       ON my_table FOR UPDATE
+       USING (user_id = auth.uid());
+   ```
+
+3. **Use existing helper functions** for role checks:
+   - `is_admin()` - Returns true if current user has admin role
+   - `is_coach()` - Returns true if current user has coach role
+   - `get_user_role(user_id)` - Returns the role for a specific user
+
+4. **Policy naming convention**: Use descriptive names like:
+   - `"Teams are publicly readable"`
+   - `"Admins and coaches can create teams"`
+   - `"Swimmers can update own record"`
+
+**Why this matters**: Tables without RLS are accessible to anyone with the Supabase anon key, which is exposed in the frontend. Supabase will show security warnings for tables without RLS.
+
 ## Environment Configuration
 
 Three environments are supported: **local**, **dev**, and **prod**.
@@ -93,6 +135,28 @@ settings.is_production      # True if production environment
 - `.env.dev` - Dev secrets (not committed)
 - `.env.prod` - Prod secrets (not committed)
 - `.env.*.example` - Templates (committed)
+
+## Testing Requirements
+
+**CRITICAL**: When writing tests, you MUST:
+
+1. **Execute the tests** - Actually run `uv run pytest` on any tests you write
+2. **Verify they pass** - If tests fail, fix them before reporting completion
+3. **Fix failures, don't skip** - If a test fails due to code issues, fix the code or test
+4. **Re-run after fixes** - Always re-run tests after making changes to confirm they pass
+
+Never report "tests complete" without having successfully executed them. This includes checking for import errors, missing dependencies, and actual test failures.
+
+```bash
+# Run specific test file
+uv run pytest tests/api/test_swimmers.py -v
+
+# Run all tests
+uv run pytest
+
+# Run with coverage
+uv run pytest --cov=src
+```
 
 ## Handling Warnings
 

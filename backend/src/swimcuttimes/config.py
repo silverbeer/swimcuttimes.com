@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # Supabase
     supabase_url: str = Field(description="Supabase project URL")
     supabase_key: SecretStr = Field(description="Supabase anon/public key")
+    supabase_service_role_key: SecretStr | None = Field(
+        default=None, description="Supabase service role key (bypasses RLS, for tests/admin)"
+    )
 
     # Anthropic (optional - only needed for image parsing)
     anthropic_api_key: SecretStr | None = Field(

@@ -596,6 +596,64 @@ def invite_create(
     console.print("[dim]Share this token with the user to sign up.[/dim]")
 
 
+def _resolve_invitation(identifier: str) -> dict:
+    """Resolve an invitation by ID (partial UUID) or email.
+
+    Args:
+        identifier: Either a partial UUID (min 8 chars) or email address
+
+    Returns:
+        Invitation dict from API
+
+    Raises:
+        typer.Exit: If invitation not found or ambiguous
+    """
+    import re
+
+    # Fetch all invitations
+    response = cli_auth.api_request("GET", "/api/v1/auth/invitations")
+    if response.status_code != 200:
+        console.print(f"[red]Error fetching invitations: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    invites = response.json()
+
+    # Check if it looks like a UUID (hex chars, possibly with dashes)
+    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+
+    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+        # Try partial UUID match
+        matches = [i for i in invites if i["id"].startswith(identifier.lower())]
+
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            console.print(f"[red]Ambiguous ID '{identifier}' matches {len(matches)} invitations:[/red]")
+            for i in matches[:5]:
+                console.print(f"  {i['id'][:8]}  {i['email']}")
+            raise typer.Exit(1)
+
+    # Try email match
+    email_matches = [i for i in invites if i["email"].lower() == identifier.lower()]
+
+    if len(email_matches) == 1:
+        return email_matches[0]
+    elif len(email_matches) > 1:
+        # Multiple invites to same email (different statuses) - prefer pending
+        pending = [i for i in email_matches if i["status"] == "pending"]
+        if len(pending) == 1:
+            return pending[0]
+        console.print(f"[red]Multiple invitations for '{identifier}':[/red]")
+        for i in email_matches[:5]:
+            console.print(f"  {i['id'][:8]}  {i['status']}")
+        raise typer.Exit(1)
+
+    # No match found
+    console.print(f"[red]Invitation not found: '{identifier}'[/red]")
+    console.print("[dim]Use a partial UUID (min 8 chars) or email address[/dim]")
+    raise typer.Exit(1)
+
+
 @invite_app.command("list")
 def invite_list():
     """List sent invitations."""
@@ -618,11 +676,11 @@ def invite_list():
         console.print("[yellow]No invitations found[/yellow]")
         return
 
-    table = Table(title="Invitations")
-    table.add_column("Email", style="cyan")
-    table.add_column("Role")
-    table.add_column("Status")
-    table.add_column("Token")
+    table = Table(title=f"Invitations ({len(invites)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Email", style="cyan", no_wrap=True)
+    table.add_column("Role", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
 
     for inv in invites:
         status_color = {
@@ -633,10 +691,10 @@ def invite_list():
         }.get(inv["status"], "white")
 
         table.add_row(
+            inv["id"][:8],
             inv["email"],
             inv["role"],
             f"[{status_color}]{inv['status']}[/{status_color}]",
-            inv.get("token", "-")[:16] + "..." if inv.get("token") else "-",
         )
 
     console.print(table)
@@ -644,7 +702,7 @@ def invite_list():
 
 @invite_app.command("revoke")
 def invite_revoke(
-    invitation_id: str = typer.Argument(..., help="Invitation ID to revoke"),
+    invite_ref: str = typer.Argument(..., help="Invitation ID (partial) or email"),
 ):
     """Revoke a pending invitation."""
     try:
@@ -653,8 +711,16 @@ def invite_revoke(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None
 
+    # Resolve invitation first
+    with console.status("Finding invitation..."):
+        invite = _resolve_invitation(invite_ref)
+
+    if invite["status"] != "pending":
+        console.print(f"[red]Cannot revoke invitation with status '{invite['status']}'[/red]")
+        raise typer.Exit(1)
+
     with console.status("Revoking invitation..."):
-        response = cli_auth.api_request("DELETE", f"/api/v1/auth/invitations/{invitation_id}")
+        response = cli_auth.api_request("DELETE", f"/api/v1/auth/invitations/{invite['id']}")
 
     if response.status_code == 404:
         console.print("[red]Invitation not found[/red]")
@@ -664,7 +730,7 @@ def invite_revoke(
         console.print(f"[red]Error: {response.text}[/red]")
         raise typer.Exit(1)
 
-    console.print("[green]Invitation revoked[/green]")
+    console.print(f"[green]Invitation to {invite['email']} revoked[/green]")
 
 
 # =============================================================================
@@ -675,15 +741,73 @@ teams_app = typer.Typer(help="Team management", no_args_is_help=True)
 app.add_typer(teams_app, name="teams")
 
 
+def _resolve_team(identifier: str) -> dict:
+    """Resolve a team by ID (partial UUID) or name.
+
+    Args:
+        identifier: Either a partial UUID (min 8 chars) or exact team name
+
+    Returns:
+        Team dict from API
+
+    Raises:
+        typer.Exit: If team not found or ambiguous
+    """
+    import re
+
+    # Check if it looks like a UUID (hex chars, possibly with dashes)
+    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+
+    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+        # Try partial UUID match - fetch all teams and filter
+        response = cli_auth.api_request("GET", "/api/v1/teams?limit=500")
+        if response.status_code != 200:
+            console.print(f"[red]Error fetching teams: {response.text}[/red]")
+            raise typer.Exit(1)
+
+        teams = response.json()
+        matches = [t for t in teams if t["id"].startswith(identifier.lower())]
+
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            console.print(f"[red]Ambiguous ID '{identifier}' matches {len(matches)} teams:[/red]")
+            for t in matches[:5]:
+                console.print(f"  {t['id'][:8]}  {t['name']}")
+            raise typer.Exit(1)
+        # Fall through to try name match
+
+    # Try exact name match
+    response = cli_auth.api_request("GET", f"/api/v1/teams?name={identifier}&limit=10")
+    if response.status_code != 200:
+        console.print(f"[red]Error searching teams: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    teams = response.json()
+    # Look for exact name match (API does partial match)
+    exact_matches = [t for t in teams if t["name"].lower() == identifier.lower()]
+
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    elif len(exact_matches) > 1:
+        console.print(f"[red]Multiple teams match '{identifier}'[/red]")
+        raise typer.Exit(1)
+
+    # No match found
+    console.print(f"[red]Team not found: '{identifier}'[/red]")
+    console.print("[dim]Use a partial UUID (min 8 chars) or exact team name[/dim]")
+    raise typer.Exit(1)
+
+
 @teams_app.command("list")
 def teams_list(
     name: str = typer.Option(None, "--name", "-n", help="Filter by name (partial match)"),
     team_type: str = typer.Option(
         None, "--type", "-t", help="Filter by type (club/high_school/college/national/olympic)"
     ),
-    lsc: str = typer.Option(None, "--lsc", help="Filter by LSC code (e.g., NE, PV)"),
+    lsc: str = typer.Option(None, "--lsc", "-l", help="Filter by LSC code (e.g., NE, PV)"),
     state: str = typer.Option(None, "--state", "-s", help="Filter by state"),
-    limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
+    limit: int = typer.Option(50, "--limit", help="Max results"),
 ):
     """List teams with optional filters."""
     try:
@@ -721,11 +845,11 @@ def teams_list(
         return
 
     table = Table(title=f"Teams ({len(teams)})")
-    table.add_column("ID", style="dim")
-    table.add_column("Name", style="cyan")
-    table.add_column("Type")
-    table.add_column("Sanctioning Body")
-    table.add_column("LSC/Division/State")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Body", no_wrap=True)
+    table.add_column("LSC", no_wrap=True)
 
     for team in teams:
         team_type_val = team.get("team_type", "")
@@ -741,7 +865,7 @@ def teams_list(
         extra = team.get("lsc") or team.get("division") or team.get("state") or "-"
 
         table.add_row(
-            team["id"][:8] + "...",
+            team["id"][:8],
             team["name"],
             f"[{type_color}]{team_type_val}[/{type_color}]",
             team.get("sanctioning_body", "-"),
@@ -753,7 +877,7 @@ def teams_list(
 
 @teams_app.command("get")
 def teams_get(
-    team_id: str = typer.Argument(..., help="Team ID"),
+    team_ref: str = typer.Argument(..., help="Team ID (partial) or name"),
 ):
     """Get details for a specific team."""
     try:
@@ -763,17 +887,7 @@ def teams_get(
         raise typer.Exit(1) from None
 
     with console.status("Fetching team..."):
-        response = cli_auth.api_request("GET", f"/api/v1/teams/{team_id}")
-
-    if response.status_code == 404:
-        console.print("[red]Team not found[/red]")
-        raise typer.Exit(1)
-
-    if response.status_code != 200:
-        console.print(f"[red]Error: {response.text}[/red]")
-        raise typer.Exit(1)
-
-    team = response.json()
+        team = _resolve_team(team_ref)
 
     table = Table(title="Team Details")
     table.add_column("Field", style="cyan")
@@ -800,7 +914,7 @@ def teams_create(
     sanctioning_body: str = typer.Option(
         ..., "--sanctioning-body", "-b", help="Sanctioning body (e.g., USA Swimming, NCAA)"
     ),
-    lsc: str = typer.Option(None, "--lsc", help="LSC code for club teams (e.g., NE, PV)"),
+    lsc: str = typer.Option(None, "--lsc", "-l", help="LSC code (REQUIRED for club teams, e.g., NE, PV)"),
     division: str = typer.Option(None, "--division", "-d", help="Division for college teams"),
     state: str = typer.Option(None, "--state", "-s", help="State for high school teams"),
     country: str = typer.Option(None, "--country", "-c", help="Country for national/olympic teams"),
@@ -855,12 +969,12 @@ def teams_create(
 
 @teams_app.command("update")
 def teams_update(
-    team_id: str = typer.Argument(..., help="Team ID to update"),
+    team_ref: str = typer.Argument(..., help="Team ID (partial) or name"),
     name: str = typer.Option(None, "--name", "-n", help="New team name"),
     sanctioning_body: str = typer.Option(
         None, "--sanctioning-body", "-b", help="New sanctioning body"
     ),
-    lsc: str = typer.Option(None, "--lsc", help="New LSC code"),
+    lsc: str = typer.Option(None, "--lsc", "-l", help="New LSC code"),
     division: str = typer.Option(None, "--division", "-d", help="New division"),
     state: str = typer.Option(None, "--state", "-s", help="New state"),
     country: str = typer.Option(None, "--country", "-c", help="New country"),
@@ -871,6 +985,11 @@ def teams_update(
     except RuntimeError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None
+
+    # Resolve team first
+    with console.status("Finding team..."):
+        team = _resolve_team(team_ref)
+    team_id = team["id"]
 
     payload = {}
     if name:
@@ -922,7 +1041,7 @@ def teams_update(
 
 @teams_app.command("delete")
 def teams_delete(
-    team_id: str = typer.Argument(..., help="Team ID to delete"),
+    team_ref: str = typer.Argument(..., help="Team ID (partial) or name"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ):
     """Delete a team (admin only)."""
@@ -932,19 +1051,10 @@ def teams_delete(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None
 
-    # Get team info first
-    with console.status("Fetching team..."):
-        response = cli_auth.api_request("GET", f"/api/v1/teams/{team_id}")
-
-    if response.status_code == 404:
-        console.print("[red]Team not found[/red]")
-        raise typer.Exit(1)
-
-    if response.status_code != 200:
-        console.print(f"[red]Error: {response.text}[/red]")
-        raise typer.Exit(1)
-
-    team = response.json()
+    # Resolve team first
+    with console.status("Finding team..."):
+        team = _resolve_team(team_ref)
+    team_id = team["id"]
 
     if not force and not typer.confirm(f"Delete team '{team['name']}'?"):
         console.print("[yellow]Cancelled[/yellow]")
@@ -962,6 +1072,492 @@ def teams_delete(
         raise typer.Exit(1)
 
     console.print(f"[green]Team '{team['name']}' deleted[/green]")
+
+
+# =============================================================================
+# SWIMMERS COMMANDS
+# =============================================================================
+
+swimmers_app = typer.Typer(help="Swimmer management", no_args_is_help=True)
+app.add_typer(swimmers_app, name="swimmers")
+
+
+def _resolve_swimmer(identifier: str) -> dict:
+    """Resolve a swimmer by ID (partial UUID), name, or USA Swimming ID.
+
+    Args:
+        identifier: Either a partial UUID (min 8 chars), name ("First Last"), or USA Swimming ID
+
+    Returns:
+        Swimmer dict from API
+
+    Raises:
+        typer.Exit: If swimmer not found or ambiguous
+    """
+    import re
+
+    # Check if it looks like a UUID (hex chars, possibly with dashes)
+    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+
+    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+        # Try partial UUID match - fetch all swimmers and filter
+        response = cli_auth.api_request("GET", "/api/v1/swimmers?limit=500")
+        if response.status_code != 200:
+            console.print(f"[red]Error fetching swimmers: {response.text}[/red]")
+            raise typer.Exit(1)
+
+        swimmers = response.json()
+        matches = [s for s in swimmers if s["id"].startswith(identifier.lower())]
+
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            console.print(f"[red]Ambiguous ID '{identifier}' matches {len(matches)} swimmers:[/red]")
+            for s in matches[:5]:
+                console.print(f"  {s['id'][:8]}  {s['first_name']} {s['last_name']}")
+            raise typer.Exit(1)
+        # Fall through to try name match
+
+    # Try name match (search API does partial match)
+    response = cli_auth.api_request("GET", f"/api/v1/swimmers?name={identifier}&limit=10")
+    if response.status_code != 200:
+        console.print(f"[red]Error searching swimmers: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    swimmers = response.json()
+
+    # Look for exact name match (first last or last, first)
+    name_lower = identifier.lower()
+    exact_matches = []
+    for s in swimmers:
+        full_name = f"{s['first_name']} {s['last_name']}".lower()
+        reverse_name = f"{s['last_name']}, {s['first_name']}".lower()
+        last_name = s['last_name'].lower()
+        if full_name == name_lower or reverse_name == name_lower or last_name == name_lower:
+            exact_matches.append(s)
+
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    elif len(exact_matches) > 1:
+        console.print(f"[red]Multiple swimmers match '{identifier}':[/red]")
+        for s in exact_matches[:5]:
+            console.print(f"  {s['id'][:8]}  {s['first_name']} {s['last_name']}")
+        raise typer.Exit(1)
+
+    # Try USA Swimming ID match
+    response = cli_auth.api_request("GET", "/api/v1/swimmers?limit=500")
+    if response.status_code == 200:
+        swimmers = response.json()
+        usa_matches = [s for s in swimmers if s.get("usa_swimming_id") == identifier]
+        if len(usa_matches) == 1:
+            return usa_matches[0]
+
+    # No match found
+    console.print(f"[red]Swimmer not found: '{identifier}'[/red]")
+    console.print("[dim]Use a partial UUID (min 8 chars), name, or USA Swimming ID[/dim]")
+    raise typer.Exit(1)
+
+
+@swimmers_app.command("list")
+def swimmers_list(
+    name: str = typer.Option(None, "--name", "-n", help="Filter by name"),
+    gender: str = typer.Option(None, "--gender", "-g", help="Filter by gender (M/F)"),
+    min_age: int = typer.Option(None, "--min-age", help="Minimum age"),
+    max_age: int = typer.Option(None, "--max-age", help="Maximum age"),
+    team: str = typer.Option(None, "--team", "-t", help="Filter by team (not yet implemented)"),
+    limit: int = typer.Option(50, "--limit", help="Max results"),
+):
+    """List swimmers with optional filters."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Build query params
+    params = []
+    if name:
+        params.append(f"name={name}")
+    if gender:
+        params.append(f"gender={gender.upper()}")
+    if min_age:
+        params.append(f"min_age={min_age}")
+    if max_age:
+        params.append(f"max_age={max_age}")
+    params.append(f"limit={limit}")
+
+    query = "&".join(params)
+    path = f"/api/v1/swimmers?{query}"
+
+    with console.status("Fetching swimmers..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    swimmers = response.json()
+
+    if not swimmers:
+        console.print("[yellow]No swimmers found[/yellow]")
+        return
+
+    table = Table(title=f"Swimmers ({len(swimmers)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Gender", no_wrap=True)
+    table.add_column("Age", no_wrap=True)
+    table.add_column("Age Group", no_wrap=True)
+
+    for swimmer in swimmers:
+        gender_color = "blue" if swimmer.get("gender") == "M" else "magenta"
+        table.add_row(
+            swimmer["id"][:8],
+            f"{swimmer['first_name']} {swimmer['last_name']}",
+            f"[{gender_color}]{swimmer.get('gender', '-')}[/{gender_color}]",
+            str(swimmer.get("age", "-")),
+            swimmer.get("age_group", "-"),
+        )
+
+    console.print(table)
+
+
+@swimmers_app.command("get")
+def swimmers_get(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+):
+    """Get details for a specific swimmer."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    with console.status("Fetching swimmer..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+
+    table = Table(title="Swimmer Details")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+
+    table.add_row("ID", swimmer["id"])
+    table.add_row("Name", f"{swimmer['first_name']} {swimmer['last_name']}")
+    table.add_row("Gender", swimmer.get("gender", "-"))
+    table.add_row("Date of Birth", swimmer.get("date_of_birth", "-"))
+    table.add_row("Age", str(swimmer.get("age", "-")))
+    table.add_row("Age Group", swimmer.get("age_group", "-"))
+    table.add_row("USA Swimming ID", swimmer.get("usa_swimming_id") or "-")
+    table.add_row("SwimCloud URL", swimmer.get("swimcloud_url") or "-")
+
+    console.print(table)
+
+
+@swimmers_app.command("create")
+def swimmers_create(
+    first_name: str = typer.Option(..., "--first", "-f", help="First name"),
+    last_name: str = typer.Option(..., "--last", "-l", help="Last name"),
+    birth_date: str = typer.Option(..., "--birth", "-b", help="Date of birth (YYYY-MM-DD)"),
+    gender: str = typer.Option(..., "--gender", "-g", help="Gender (M/F)"),
+    usa_swimming_id: str = typer.Option(None, "--usa-id", help="USA Swimming ID"),
+    swimcloud_url: str = typer.Option(None, "--swimcloud", help="SwimCloud URL"),
+):
+    """Create a new swimmer (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    payload = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "date_of_birth": birth_date,
+        "gender": gender.upper(),
+    }
+    if usa_swimming_id:
+        payload["usa_swimming_id"] = usa_swimming_id
+    if swimcloud_url:
+        payload["swimcloud_url"] = swimcloud_url
+
+    with console.status("Creating swimmer..."):
+        response = cli_auth.api_request("POST", "/api/v1/swimmers", json_data=payload)
+
+    if response.status_code == 400:
+        err = response.json()
+        console.print(f"[red]Validation error: {err.get('detail', response.text)}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Swimmer already exists')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    swimmer = response.json()
+    console.print("[green]Swimmer created![/green]")
+    console.print(f"ID: {swimmer['id'][:8]}")
+    console.print(f"Name: {swimmer['first_name']} {swimmer['last_name']}")
+
+
+@swimmers_app.command("update")
+def swimmers_update(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+    first_name: str = typer.Option(None, "--first", "-f", help="New first name"),
+    last_name: str = typer.Option(None, "--last", "-l", help="New last name"),
+    birth_date: str = typer.Option(None, "--birth", "-b", help="New date of birth (YYYY-MM-DD)"),
+    gender: str = typer.Option(None, "--gender", "-g", help="New gender (M/F)"),
+    usa_swimming_id: str = typer.Option(None, "--usa-id", help="New USA Swimming ID"),
+    swimcloud_url: str = typer.Option(None, "--swimcloud", help="New SwimCloud URL"),
+):
+    """Update a swimmer (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer first
+    with console.status("Finding swimmer..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+    swimmer_id = swimmer["id"]
+
+    payload = {}
+    if first_name:
+        payload["first_name"] = first_name
+    if last_name:
+        payload["last_name"] = last_name
+    if birth_date:
+        payload["date_of_birth"] = birth_date
+    if gender:
+        payload["gender"] = gender.upper()
+    if usa_swimming_id:
+        payload["usa_swimming_id"] = usa_swimming_id
+    if swimcloud_url:
+        payload["swimcloud_url"] = swimcloud_url
+
+    if not payload:
+        console.print("[yellow]No updates provided[/yellow]")
+        raise typer.Exit(1)
+
+    with console.status("Updating swimmer..."):
+        response = cli_auth.api_request("PATCH", f"/api/v1/swimmers/{swimmer_id}", json_data=payload)
+
+    if response.status_code == 404:
+        console.print("[red]Swimmer not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 400:
+        err = response.json()
+        console.print(f"[red]Validation error: {err.get('detail', response.text)}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'USA Swimming ID already exists')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    swimmer = response.json()
+    console.print("[green]Swimmer updated![/green]")
+    console.print(f"Name: {swimmer['first_name']} {swimmer['last_name']}")
+
+
+@swimmers_app.command("delete")
+def swimmers_delete(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a swimmer (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer first
+    with console.status("Finding swimmer..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+    swimmer_id = swimmer["id"]
+    swimmer_name = f"{swimmer['first_name']} {swimmer['last_name']}"
+
+    if not force and not typer.confirm(f"Delete swimmer '{swimmer_name}'?"):
+        console.print("[yellow]Cancelled[/yellow]")
+        raise typer.Exit(0)
+
+    with console.status("Deleting swimmer..."):
+        response = cli_auth.api_request("DELETE", f"/api/v1/swimmers/{swimmer_id}")
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 204:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Swimmer '{swimmer_name}' deleted[/green]")
+
+
+@swimmers_app.command("teams")
+def swimmers_teams(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+    all_history: bool = typer.Option(False, "--all", "-a", help="Include historical memberships"),
+):
+    """List teams a swimmer belongs to."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer first
+    with console.status("Finding swimmer..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+    swimmer_id = swimmer["id"]
+    swimmer_name = f"{swimmer['first_name']} {swimmer['last_name']}"
+
+    current_only = "false" if all_history else "true"
+    path = f"/api/v1/swimmers/{swimmer_id}/teams?current_only={current_only}"
+
+    with console.status("Fetching teams..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    teams = response.json()
+
+    if not teams:
+        console.print(f"[yellow]{swimmer_name} is not on any teams[/yellow]")
+        return
+
+    table = Table(title=f"Teams for {swimmer_name}")
+    table.add_column("Team", style="cyan", no_wrap=True)
+    table.add_column("Start Date", no_wrap=True)
+    table.add_column("End Date", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+
+    for team in teams:
+        status = "[green]Current[/green]" if team.get("is_current") else "[dim]Past[/dim]"
+        table.add_row(
+            team.get("team_name", "-"),
+            team.get("start_date", "-"),
+            team.get("end_date") or "-",
+            status,
+        )
+
+    console.print(table)
+
+
+@swimmers_app.command("assign")
+def swimmers_assign(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+    team_ref: str = typer.Argument(..., help="Team ID (partial) or name"),
+    start_date: str = typer.Option(None, "--start", "-s", help="Start date (YYYY-MM-DD, default: today)"),
+):
+    """Assign a swimmer to a team (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer and team
+    with console.status("Finding swimmer and team..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+        team = _resolve_team(team_ref)
+
+    swimmer_id = swimmer["id"]
+    team_id = team["id"]
+    swimmer_name = f"{swimmer['first_name']} {swimmer['last_name']}"
+    team_name = team["name"]
+
+    payload = {"team_id": team_id}
+    if start_date:
+        payload["start_date"] = start_date
+
+    with console.status("Assigning swimmer to team..."):
+        response = cli_auth.api_request("POST", f"/api/v1/swimmers/{swimmer_id}/teams", json_data=payload)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 404:
+        console.print("[red]Swimmer or team not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Already a member of this team')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]{swimmer_name} assigned to {team_name}[/green]")
+
+
+@swimmers_app.command("unassign")
+def swimmers_unassign(
+    swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
+    team_ref: str = typer.Argument(..., help="Team ID (partial) or name"),
+    end_date: str = typer.Option(None, "--end", "-e", help="End date (YYYY-MM-DD, default: today)"),
+):
+    """End a swimmer's team membership (admin or coach only)."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer and team
+    with console.status("Finding swimmer and team..."):
+        swimmer = _resolve_swimmer(swimmer_ref)
+        team = _resolve_team(team_ref)
+
+    swimmer_id = swimmer["id"]
+    team_id = team["id"]
+    swimmer_name = f"{swimmer['first_name']} {swimmer['last_name']}"
+    team_name = team["name"]
+
+    path = f"/api/v1/swimmers/{swimmer_id}/teams/{team_id}"
+    if end_date:
+        path += f"?end_date={end_date}"
+
+    with console.status("Ending team membership..."):
+        response = cli_auth.api_request("DELETE", path)
+
+    if response.status_code == 403:
+        console.print("[red]Admin or coach access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 404:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Not a current member of this team')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]{swimmer_name} removed from {team_name}[/green]")
 
 
 # =============================================================================
@@ -999,9 +1595,9 @@ def users_list():
         return
 
     table = Table(title=f"Users ({len(users)})")
-    table.add_column("ID", style="dim")
-    table.add_column("Display Name", style="cyan")
-    table.add_column("Role")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Display Name", style="cyan", no_wrap=True)
+    table.add_column("Role", no_wrap=True)
 
     for user in users:
         role_color = {
@@ -1012,7 +1608,7 @@ def users_list():
         }.get(user["role"], "white")
 
         table.add_row(
-            user["id"][:8] + "...",
+            user["id"][:8],
             user.get("display_name", "-"),
             f"[{role_color}]{user['role']}[/{role_color}]",
         )

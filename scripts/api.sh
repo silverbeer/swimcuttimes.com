@@ -15,16 +15,83 @@ PID_FILE="$PROJECT_ROOT/.api.pid"
 LOG_FILE="$PROJECT_ROOT/.api.log"
 APP_PATH="src/swimcuttimes/api/app.py"
 
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+# Emojis
+API="🚀"
+CHECK="✅"
+CROSS="❌"
+WARN="⚠️ "
+INFO="📋"
+STOP="🛑"
+LOGS="📜"
+SYNC="🔄"
+
+print_header() {
+    echo ""
+    echo -e "${BOLD}${BLUE}$1${RESET}"
+    echo -e "${DIM}────────────────────────────────────────${RESET}"
+}
+
+print_success() {
+    echo -e "${GREEN}${CHECK} $1${RESET}"
+}
+
+print_error() {
+    echo -e "${RED}${CROSS} $1${RESET}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}${WARN}$1${RESET}"
+}
+
+print_info() {
+    echo -e "${CYAN}${INFO} $1${RESET}"
+}
+
+print_step() {
+    echo -e "${SYNC} $1"
+}
+
+format_env_badge() {
+    local env_name="$1"
+    case "$env_name" in
+        local)
+            echo -e "${GREEN}${BOLD}LOCAL${RESET}"
+            ;;
+        development)
+            echo -e "${YELLOW}${BOLD}DEV${RESET}"
+            ;;
+        production)
+            echo -e "${RED}${BOLD}PROD${RESET}"
+            ;;
+        *)
+            echo -e "${DIM}$env_name${RESET}"
+            ;;
+    esac
+}
+
 show_usage() {
-    echo "Usage: $0 <start|stop|status|restart|logs|tail>"
+    print_header "${API} API Server Management"
+    echo ""
+    echo -e "Usage: ${BOLD}$0${RESET} <command>"
     echo ""
     echo "Commands:"
-    echo "  start      Start the API server (background)"
-    echo "  stop       Stop the API server"
-    echo "  status     Check if the API server is running"
-    echo "  restart    Restart the API server"
-    echo "  logs       Follow logs (tail -f) with color"
-    echo "  tail [N]   Show last N lines (default: 50) with color"
+    echo -e "  ${BOLD}start${RESET}      Start the API server (background)"
+    echo -e "  ${BOLD}stop${RESET}       Stop the API server"
+    echo -e "  ${BOLD}status${RESET}     Check if the API server is running"
+    echo -e "  ${BOLD}restart${RESET}    Restart the API server"
+    echo -e "  ${BOLD}logs${RESET}       Follow logs (tail -f) with color"
+    echo -e "  ${BOLD}tail${RESET} [N]   Show last N lines (default: 50) with color"
     exit 1
 }
 
@@ -39,39 +106,47 @@ is_running() {
 }
 
 do_start() {
+    print_header "${API} Start API Server"
+
     if is_running; then
-        echo "API server is already running (PID: $(cat "$PID_FILE"))"
+        print_warning "API server is already running (PID: $(cat "$PID_FILE"))"
         exit 1
     fi
 
-    echo "Starting API server..."
+    print_step "Starting server..."
     cd "$BACKEND_DIR"
     nohup uv run fastapi dev "$APP_PATH" > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
     sleep 1
 
     if is_running; then
-        echo "API server started (PID: $(cat "$PID_FILE"))"
-        echo "  URL: http://127.0.0.1:8000"
-        echo "  Docs: http://127.0.0.1:8000/docs"
-        echo "  Logs: ./scripts/api.sh logs"
+        echo ""
+        print_success "API server started (PID: $(cat "$PID_FILE"))"
+        echo ""
+        echo -e "   ${BOLD}URL${RESET}:   http://127.0.0.1:8000"
+        echo -e "   ${BOLD}Docs${RESET}:  http://127.0.0.1:8000/docs"
+        echo -e "   ${BOLD}Logs${RESET}:  ${DIM}./scripts/api.sh logs${RESET}"
     else
-        echo "Failed to start API server. Check logs:"
-        tail -20 "$LOG_FILE"
+        print_error "Failed to start API server"
+        echo ""
+        echo -e "   ${DIM}Recent logs:${RESET}"
+        tail -20 "$LOG_FILE" | sed 's/^/   /'
         rm -f "$PID_FILE"
         exit 1
     fi
 }
 
 do_stop() {
+    print_header "${STOP} Stop API Server"
+
     if ! is_running; then
-        echo "API server is not running"
+        print_info "API server is not running"
         rm -f "$PID_FILE"
         exit 0
     fi
 
     pid=$(cat "$PID_FILE")
-    echo "Stopping API server (PID: $pid)..."
+    print_step "Stopping server (PID: $pid)..."
     kill "$pid" 2>/dev/null || true
 
     # Wait for process to stop
@@ -88,17 +163,23 @@ do_stop() {
     fi
 
     rm -f "$PID_FILE"
-    echo "API server stopped"
+    echo ""
+    print_success "API server stopped"
 }
 
 do_status() {
+    print_header "${API} API Server Status"
+
     if is_running; then
         pid=$(cat "$PID_FILE")
-        echo "API server is running (PID: $pid)"
-        echo "  URL: http://127.0.0.1:8000"
-        echo "  Docs: http://127.0.0.1:8000/docs"
+        echo ""
+        print_success "Server is running (PID: $pid)"
+        echo ""
+        echo -e "   ${BOLD}URL${RESET}:   http://127.0.0.1:8000"
+        echo -e "   ${BOLD}Docs${RESET}:  http://127.0.0.1:8000/docs"
     else
-        echo "API server is not running"
+        echo ""
+        print_info "Server is not running"
         rm -f "$PID_FILE" 2>/dev/null || true
     fi
 
@@ -111,47 +192,58 @@ do_status() {
         supabase_url=$(grep -E "^SUPABASE_URL=" "$env_file" 2>/dev/null | cut -d= -f2)
 
         echo ""
-        echo "Environment:"
+        echo -e "   ${BOLD}Environment${RESET}"
         if [ -n "$env_name" ]; then
-            echo "  Config: $env_name"
+            echo -e "   ├─ Config:   $(format_env_badge "$env_name")"
         else
-            echo "  Config: not set"
+            echo -e "   ├─ Config:   ${DIM}not set${RESET}"
         fi
         if [ -n "$supabase_url" ]; then
-            echo "  Supabase: $supabase_url"
+            echo -e "   └─ Supabase: ${DIM}$supabase_url${RESET}"
             # Determine Studio URL
             if [[ "$supabase_url" == *"127.0.0.1"* ]] || [[ "$supabase_url" == *"localhost"* ]]; then
-                echo "  Studio: http://127.0.0.1:54323"
+                echo -e "      Studio:   ${DIM}http://127.0.0.1:54323${RESET}"
             else
                 # Extract project ref from cloud URL (e.g., https://abcdefgh.supabase.co)
                 local project_ref
                 project_ref=$(echo "$supabase_url" | sed -E 's|https://([^.]+)\.supabase\.co.*|\1|')
                 if [ -n "$project_ref" ] && [ "$project_ref" != "$supabase_url" ]; then
-                    echo "  Studio: https://supabase.com/dashboard/project/$project_ref"
+                    echo -e "      Dashboard: ${DIM}https://supabase.com/dashboard/project/$project_ref${RESET}"
                 fi
             fi
         fi
     else
         echo ""
-        echo "Environment: .env not found (run ./scripts/env.sh local)"
+        echo -e "   ${YELLOW}${WARN}Environment: .env not found${RESET}"
+        echo -e "   ${DIM}Run: ./scripts/env.sh local${RESET}"
     fi
 }
 
 do_logs() {
+    print_header "${LOGS} API Server Logs"
+
     if [ -f "$LOG_FILE" ]; then
+        echo -e "${DIM}Following logs... (Ctrl+C to exit)${RESET}"
+        echo ""
         tail -f "$LOG_FILE" | colorize_logs
     else
-        echo "No log file found. Is the server running?"
+        print_error "No log file found"
+        echo -e "   ${DIM}Is the server running?${RESET}"
         exit 1
     fi
 }
 
 do_tail() {
     local lines="${2:-50}"
+
+    print_header "${LOGS} API Server Logs (last $lines lines)"
+
     if [ -f "$LOG_FILE" ]; then
+        echo ""
         tail -n "$lines" "$LOG_FILE" | colorize_logs
     else
-        echo "No log file found. Is the server running?"
+        print_error "No log file found"
+        echo -e "   ${DIM}Is the server running?${RESET}"
         exit 1
     fi
 }
