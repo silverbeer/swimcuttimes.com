@@ -119,7 +119,7 @@ def create_swimmer(
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=f"A swimmer with USA Swimming ID '{data.usa_swimming_id}' already exists",
+                    detail=f"Swimmer with USA Swimming ID '{data.usa_swimming_id}' exists",
                 )
 
         swimmer = Swimmer(
@@ -219,7 +219,7 @@ def update_swimmer(
             if other and other.id != swimmer_id:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=f"A swimmer with USA Swimming ID '{data.usa_swimming_id}' already exists",
+                    detail=f"Swimmer with USA Swimming ID '{data.usa_swimming_id}' exists",
                 )
 
         # Build update dict

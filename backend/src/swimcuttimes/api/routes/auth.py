@@ -1,14 +1,14 @@
 """Authentication and invitation endpoints."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, EmailStr
 from supabase_auth.types import (
     SignInWithEmailAndPasswordCredentials,
     SignUpWithEmailAndPasswordCredentials,
 )
-from pydantic import BaseModel, EmailStr
 
 from swimcuttimes import get_logger
 from swimcuttimes.api.auth import AdminUser, CurrentUser
@@ -148,7 +148,7 @@ async def signup(request: SignupRequest, client: SupabaseDep) -> AuthResponse:
         {
             "status": "accepted",
             "accepted_by": user_id,
-            "accepted_at": datetime.now(timezone.utc).isoformat(),
+            "accepted_at": datetime.now(UTC).isoformat(),
         }
     ).eq("id", invitation["id"]).execute()
 

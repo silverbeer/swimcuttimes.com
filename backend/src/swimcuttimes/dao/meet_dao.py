@@ -4,9 +4,10 @@ from datetime import date
 from uuid import UUID
 
 from supabase import Client
+
 from swimcuttimes.dao.base import BaseDAO
 from swimcuttimes.models.event import Course
-from swimcuttimes.models.meet import Meet, MeetType
+from swimcuttimes.models.meet import Meet, MeetTeam, MeetType
 
 
 class MeetDAO(BaseDAO[Meet]):
@@ -169,6 +170,41 @@ class MeetDAO(BaseDAO[Meet]):
         result = query.limit(limit).order("start_date", desc=True).execute()
         return [self._to_model(row) for row in result.data]
 
+    def partial_update(self, id: UUID, updates: dict) -> Meet | None:
+        """Update specific fields of a meet.
+
+        Args:
+            id: Meet UUID
+            updates: Dictionary of field names to new values
+
+        Returns:
+            Updated Meet or None if not found
+        """
+        # Filter out None values
+        data = {k: v for k, v in updates.items() if v is not None}
+
+        if not data:
+            return self.get_by_id(id)
+
+        # Convert enums to values
+        if "course" in data and isinstance(data["course"], Course):
+            data["course"] = data["course"].value
+        if "meet_type" in data and isinstance(data["meet_type"], MeetType):
+            data["meet_type"] = data["meet_type"].value
+
+        # Convert dates to ISO format
+        if "start_date" in data and hasattr(data["start_date"], "isoformat"):
+            data["start_date"] = data["start_date"].isoformat()
+        if "end_date" in data and hasattr(data["end_date"], "isoformat"):
+            data["end_date"] = data["end_date"].isoformat()
+
+        result = self.table.update(data).eq("id", str(id)).execute()
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
+
     def _to_model(self, row: dict) -> Meet:
         """Convert database row to Meet model."""
         return Meet(
@@ -209,5 +245,113 @@ class MeetDAO(BaseDAO[Meet]):
             data["country"] = model.country
         if model.end_date:
             data["end_date"] = model.end_date.isoformat()
+
+        return data
+
+
+class MeetTeamDAO(BaseDAO[MeetTeam]):
+    """DAO for MeetTeam associations."""
+
+    table_name = "meet_teams"
+    model_class = MeetTeam
+
+    def __init__(self, client: Client | None = None):
+        super().__init__(client)
+
+    def find_by_meet(self, meet_id: UUID) -> list[MeetTeam]:
+        """Find all teams participating in a meet.
+
+        Args:
+            meet_id: The meet's UUID
+
+        Returns:
+            List of MeetTeam associations
+        """
+        result = self.table.select("*").eq("meet_id", str(meet_id)).execute()
+        return [self._to_model(row) for row in result.data]
+
+    def find_by_team(self, team_id: UUID) -> list[MeetTeam]:
+        """Find all meets a team participated in.
+
+        Args:
+            team_id: The team's UUID
+
+        Returns:
+            List of MeetTeam associations
+        """
+        result = self.table.select("*").eq("team_id", str(team_id)).execute()
+        return [self._to_model(row) for row in result.data]
+
+    def find_host_teams(self, meet_id: UUID) -> list[MeetTeam]:
+        """Find host team(s) for a meet.
+
+        Args:
+            meet_id: The meet's UUID
+
+        Returns:
+            List of MeetTeam associations where is_host=True
+        """
+        result = self.table.select("*").eq("meet_id", str(meet_id)).eq("is_host", True).execute()
+        return [self._to_model(row) for row in result.data]
+
+    def is_team_in_meet(self, meet_id: UUID, team_id: UUID) -> bool:
+        """Check if a team is registered for a meet.
+
+        Args:
+            meet_id: The meet's UUID
+            team_id: The team's UUID
+
+        Returns:
+            True if team is participating in meet
+        """
+        result = (
+            self.table.select("id")
+            .eq("meet_id", str(meet_id))
+            .eq("team_id", str(team_id))
+            .limit(1)
+            .execute()
+        )
+        return len(result.data) > 0
+
+    def find_by_meet_and_team(self, meet_id: UUID, team_id: UUID) -> MeetTeam | None:
+        """Find a specific meet-team association.
+
+        Args:
+            meet_id: The meet's UUID
+            team_id: The team's UUID
+
+        Returns:
+            MeetTeam if found, None otherwise
+        """
+        result = (
+            self.table.select("*")
+            .eq("meet_id", str(meet_id))
+            .eq("team_id", str(team_id))
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            return None
+        return self._to_model(result.data[0])
+
+    def _to_model(self, row: dict) -> MeetTeam:
+        """Convert database row to MeetTeam model."""
+        return MeetTeam(
+            id=UUID(row["id"]) if row.get("id") else None,
+            meet_id=UUID(row["meet_id"]),
+            team_id=UUID(row["team_id"]),
+            is_host=row.get("is_host", False),
+        )
+
+    def _to_db(self, model: MeetTeam) -> dict:
+        """Convert MeetTeam model to database row."""
+        data = {
+            "meet_id": str(model.meet_id),
+            "team_id": str(model.team_id),
+            "is_host": model.is_host,
+        }
+
+        if model.id:
+            data["id"] = str(model.id)
 
         return data

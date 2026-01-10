@@ -17,6 +17,9 @@ from swimcuttimes.api.routes import (
     auth_router,
     follows_router,
     health_router,
+    meets_router,
+    swim_times_router,
+    swimmer_times_router,
     swimmers_router,
     teams_router,
     time_standards_router,
@@ -57,6 +60,9 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(follows_router, prefix="/api/v1")
+    app.include_router(meets_router, prefix="/api/v1")
+    app.include_router(swim_times_router, prefix="/api/v1")
+    app.include_router(swimmer_times_router, prefix="/api/v1")
     app.include_router(swimmers_router, prefix="/api/v1")
     app.include_router(teams_router, prefix="/api/v1")
     app.include_router(time_standards_router, prefix="/api/v1")

@@ -4,6 +4,7 @@ from datetime import date
 from uuid import UUID
 
 from supabase import Client
+
 from swimcuttimes.dao.base import BaseDAO
 from swimcuttimes.models.swim_time import Round, SwimTime
 
@@ -250,6 +251,42 @@ class SwimTimeDAO(BaseDAO[SwimTime]):
 
         result = query.order("time_centiseconds").limit(limit).execute()
         return [self._to_model(row) for row in result.data]
+
+    def partial_update(self, id: UUID, updates: dict) -> SwimTime | None:
+        """Update specific fields of a swim time.
+
+        Args:
+            id: SwimTime UUID
+            updates: Dictionary of field names to new values
+
+        Returns:
+            Updated SwimTime or None if not found
+        """
+        # Make a copy of the updates dict
+        data = dict(updates)
+
+        if not data:
+            return self.get_by_id(id)
+
+        # Convert enums to values
+        if "round" in data and isinstance(data["round"], Round):
+            data["round"] = data["round"].value
+
+        # Convert dates to ISO format
+        if "swim_date" in data and hasattr(data["swim_date"], "isoformat"):
+            data["swim_date"] = data["swim_date"].isoformat()
+
+        # Convert UUIDs to strings
+        for key in ["swimmer_id", "event_id", "meet_id", "team_id"]:
+            if key in data and isinstance(data[key], UUID):
+                data[key] = str(data[key])
+
+        result = self.table.update(data).eq("id", str(id)).execute()
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
 
     def _to_model(self, row: dict) -> SwimTime:
         """Convert database row to SwimTime model."""

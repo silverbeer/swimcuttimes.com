@@ -4,6 +4,7 @@ from datetime import date
 from uuid import UUID
 
 from supabase import Client
+
 from swimcuttimes.dao.base import BaseDAO
 from swimcuttimes.dao.event_dao import EventDAO
 from swimcuttimes.models.event import Course, Event, Stroke
