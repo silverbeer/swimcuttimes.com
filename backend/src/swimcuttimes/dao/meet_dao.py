@@ -1,9 +1,9 @@
 """Data Access Object for Meets."""
 
 from datetime import date
-from uuid import UUID
 
 from supabase import Client
+
 from swimcuttimes.dao.base import BaseDAO
 from swimcuttimes.models.event import Course
 from swimcuttimes.models.meet import Meet, MeetType
@@ -172,7 +172,7 @@ class MeetDAO(BaseDAO[Meet]):
     def _to_model(self, row: dict) -> Meet:
         """Convert database row to Meet model."""
         return Meet(
-            id=UUID(row["id"]) if row.get("id") else None,
+            id=row.get("id"),
             name=row["name"],
             location=row["location"],
             city=row["city"],

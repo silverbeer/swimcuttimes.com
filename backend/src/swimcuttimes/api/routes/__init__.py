@@ -3,6 +3,7 @@
 from swimcuttimes.api.routes.auth import router as auth_router
 from swimcuttimes.api.routes.follows import router as follows_router
 from swimcuttimes.api.routes.health import router as health_router
+from swimcuttimes.api.routes.meets import router as meets_router
 from swimcuttimes.api.routes.suits import router as suits_router
 from swimcuttimes.api.routes.swimmers import router as swimmers_router
 from swimcuttimes.api.routes.teams import router as teams_router
@@ -12,6 +13,7 @@ __all__ = [
     "auth_router",
     "follows_router",
     "health_router",
+    "meets_router",
     "suits_router",
     "swimmers_router",
     "teams_router",
