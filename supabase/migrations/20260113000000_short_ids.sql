@@ -19,7 +19,8 @@ BEGIN
     END LOOP;
     RETURN result;
 END;
-$$ LANGUAGE plpgsql VOLATILE;
+$$ LANGUAGE plpgsql VOLATILE
+SET search_path = '';
 
 -- =============================================================================
 -- DROP POLICIES THAT REFERENCE ID COLUMNS
@@ -386,12 +387,13 @@ CREATE POLICY "Fans can request to follow"
     );
 
 -- Fan follows: Fans can respond to follow invites
+-- Check that the swimmer (via user_id) initiated this invite
 CREATE POLICY "Fans can respond to follow invites"
     ON fan_follows FOR UPDATE
     USING (
         fan_id = auth.uid()
         AND status = 'pending'
-        AND initiated_by IN (SELECT id FROM swimmers WHERE id = swimmer_id)
+        AND initiated_by IN (SELECT user_id FROM swimmers WHERE id = swimmer_id)
     )
     WITH CHECK (status IN ('approved', 'denied'));
 
