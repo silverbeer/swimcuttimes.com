@@ -197,9 +197,9 @@ def _load_json_to_db(json_path: Path) -> None:
     """Load time standards from JSON file into database."""
     import json
 
+    from swimcuttimes.models import Course, Gender, Stroke
     from swimcuttimes.parser import convert_sheet_to_time_standards
     from swimcuttimes.parser.schemas import ParsedTimeEntry, ParsedTimeStandardSheet
-    from swimcuttimes.models import Course, Gender, Stroke
 
     # Load JSON
     data = json.loads(json_path.read_text())
@@ -358,13 +358,15 @@ def _pivot_standards_models(standards: list) -> list[dict]:
     """Pivot TimeStandard models to group Cut Off Time and Cut Time into single rows."""
     from collections import defaultdict
 
-    grouped: dict[tuple, dict] = defaultdict(lambda: {
-        "event": None,
-        "gender": None,
-        "age_group": None,
-        "cut_off_time": "-",
-        "cut_time": "-",
-    })
+    grouped: dict[tuple, dict] = defaultdict(
+        lambda: {
+            "event": None,
+            "gender": None,
+            "age_group": None,
+            "cut_off_time": "-",
+            "cut_time": "-",
+        }
+    )
 
     for ts in standards:
         key = (
@@ -403,13 +405,15 @@ def _pivot_time_standards(standards: list[dict]) -> list[dict]:
     from collections import defaultdict
 
     # Group by event + gender + age_group
-    grouped: dict[tuple, dict] = defaultdict(lambda: {
-        "event": None,
-        "gender": None,
-        "age_group": None,
-        "cut_off_time": "-",
-        "cut_time": "-",
-    })
+    grouped: dict[tuple, dict] = defaultdict(
+        lambda: {
+            "event": None,
+            "gender": None,
+            "age_group": None,
+            "cut_off_time": "-",
+            "cut_time": "-",
+        }
+    )
 
     for ts in standards:
         event = ts.get("event", {})
@@ -482,10 +486,19 @@ def _make_ts_table(title: str, rows: list[dict]) -> Table:
 @ts_app.command("list")
 def ts_list(
     gender: str = typer.Option(None, "--gender", "-g", help="Filter by gender (M/F)"),
-    stroke: str = typer.Option(None, "--stroke", "-s", help="Filter by stroke (freestyle/backstroke/breaststroke/butterfly/im)"),
+    stroke: str = typer.Option(
+        None,
+        "--stroke",
+        "-s",
+        help="Filter by stroke (freestyle/backstroke/breaststroke/butterfly/im)",
+    ),
     course: str = typer.Option(None, "--course", "-c", help="Filter by course (scy/scm/lcm)"),
-    distance: int = typer.Option(None, "--distance", "-d", help="Filter by distance (50/100/200/500/etc)"),
-    age_group: str = typer.Option(None, "--age", "-a", help="Filter by age group (e.g., 10-under, 11-12, 13-14, 15-18, Open)"),
+    distance: int = typer.Option(
+        None, "--distance", "-d", help="Filter by distance (50/100/200/500/etc)"
+    ),
+    age_group: str = typer.Option(
+        None, "--age", "-a", help="Filter by age group (e.g., 10-under, 11-12, 13-14, 15-18, Open)"
+    ),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
 ):
     """List time standards."""
@@ -619,16 +632,18 @@ def _resolve_invitation(identifier: str) -> dict:
     invites = response.json()
 
     # Check if it looks like a UUID (hex chars, possibly with dashes)
-    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+    is_uuid_like = bool(re.match(r"^[0-9a-f-]+$", identifier.lower()))
 
-    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+    if is_uuid_like and len(identifier.replace("-", "")) >= 8:
         # Try partial UUID match
         matches = [i for i in invites if i["id"].startswith(identifier.lower())]
 
         if len(matches) == 1:
             return matches[0]
         elif len(matches) > 1:
-            console.print(f"[red]Ambiguous ID '{identifier}' matches {len(matches)} invitations:[/red]")
+            console.print(
+                f"[red]Ambiguous ID '{identifier}' matches {len(matches)} invitations:[/red]"
+            )
             for i in matches[:5]:
                 console.print(f"  {i['id'][:8]}  {i['email']}")
             raise typer.Exit(1)
@@ -756,9 +771,9 @@ def _resolve_team(identifier: str) -> dict:
     import re
 
     # Check if it looks like a UUID (hex chars, possibly with dashes)
-    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+    is_uuid_like = bool(re.match(r"^[0-9a-f-]+$", identifier.lower()))
 
-    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+    if is_uuid_like and len(identifier.replace("-", "")) >= 8:
         # Try partial UUID match - fetch all teams and filter
         response = cli_auth.api_request("GET", "/api/v1/teams?limit=500")
         if response.status_code != 200:
@@ -914,7 +929,9 @@ def teams_create(
     sanctioning_body: str = typer.Option(
         ..., "--sanctioning-body", "-b", help="Sanctioning body (e.g., USA Swimming, NCAA)"
     ),
-    lsc: str = typer.Option(None, "--lsc", "-l", help="LSC code (REQUIRED for club teams, e.g., NE, PV)"),
+    lsc: str = typer.Option(
+        None, "--lsc", "-l", help="LSC code (REQUIRED for club teams, e.g., NE, PV)"
+    ),
     division: str = typer.Option(None, "--division", "-d", help="Division for college teams"),
     state: str = typer.Option(None, "--state", "-s", help="State for high school teams"),
     country: str = typer.Option(None, "--country", "-c", help="Country for national/olympic teams"),
@@ -1097,9 +1114,9 @@ def _resolve_swimmer(identifier: str) -> dict:
     import re
 
     # Check if it looks like a UUID (hex chars, possibly with dashes)
-    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+    is_uuid_like = bool(re.match(r"^[0-9a-f-]+$", identifier.lower()))
 
-    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+    if is_uuid_like and len(identifier.replace("-", "")) >= 8:
         # Try partial UUID match - fetch all swimmers and filter
         response = cli_auth.api_request("GET", "/api/v1/swimmers?limit=500")
         if response.status_code != 200:
@@ -1112,7 +1129,9 @@ def _resolve_swimmer(identifier: str) -> dict:
         if len(matches) == 1:
             return matches[0]
         elif len(matches) > 1:
-            console.print(f"[red]Ambiguous ID '{identifier}' matches {len(matches)} swimmers:[/red]")
+            console.print(
+                f"[red]Ambiguous ID '{identifier}' matches {len(matches)} swimmers:[/red]"
+            )
             for s in matches[:5]:
                 console.print(f"  {s['id'][:8]}  {s['first_name']} {s['last_name']}")
             raise typer.Exit(1)
@@ -1132,7 +1151,7 @@ def _resolve_swimmer(identifier: str) -> dict:
     for s in swimmers:
         full_name = f"{s['first_name']} {s['last_name']}".lower()
         reverse_name = f"{s['last_name']}, {s['first_name']}".lower()
-        last_name = s['last_name'].lower()
+        last_name = s["last_name"].lower()
         if full_name == name_lower or reverse_name == name_lower or last_name == name_lower:
             exact_matches.append(s)
 
@@ -1347,7 +1366,9 @@ def swimmers_update(
         raise typer.Exit(1)
 
     with console.status("Updating swimmer..."):
-        response = cli_auth.api_request("PATCH", f"/api/v1/swimmers/{swimmer_id}", json_data=payload)
+        response = cli_auth.api_request(
+            "PATCH", f"/api/v1/swimmers/{swimmer_id}", json_data=payload
+        )
 
     if response.status_code == 404:
         console.print("[red]Swimmer not found[/red]")
@@ -1468,7 +1489,9 @@ def swimmers_teams(
 def swimmers_assign(
     swimmer_ref: str = typer.Argument(..., help="Swimmer ID (partial), name, or USA Swimming ID"),
     team_ref: str = typer.Argument(..., help="Team ID (partial) or name"),
-    start_date: str = typer.Option(None, "--start", "-s", help="Start date (YYYY-MM-DD, default: today)"),
+    start_date: str = typer.Option(
+        None, "--start", "-s", help="Start date (YYYY-MM-DD, default: today)"
+    ),
 ):
     """Assign a swimmer to a team (admin or coach only)."""
     try:
@@ -1492,7 +1515,9 @@ def swimmers_assign(
         payload["start_date"] = start_date
 
     with console.status("Assigning swimmer to team..."):
-        response = cli_auth.api_request("POST", f"/api/v1/swimmers/{swimmer_id}/teams", json_data=payload)
+        response = cli_auth.api_request(
+            "POST", f"/api/v1/swimmers/{swimmer_id}/teams", json_data=payload
+        )
 
     if response.status_code == 403:
         console.print("[red]Admin or coach access required[/red]")
@@ -1639,9 +1664,9 @@ def _resolve_suit_model(identifier: str) -> dict:
     import re
 
     # Check if it looks like a UUID (hex chars, possibly with dashes)
-    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+    is_uuid_like = bool(re.match(r"^[0-9a-f-]+$", identifier.lower()))
 
-    if is_uuid_like and len(identifier.replace('-', '')) >= 8:
+    if is_uuid_like and len(identifier.replace("-", "")) >= 8:
         # Try partial UUID match - fetch all models and filter
         response = cli_auth.api_request("GET", "/api/v1/suits/models?limit=500")
         if response.status_code != 200:
@@ -1711,9 +1736,9 @@ def _resolve_swimmer_suit(identifier: str) -> dict:
 
     # For suits, we need to know the swimmer_id to fetch
     # This function requires either a UUID or we search all suits
-    is_uuid_like = bool(re.match(r'^[0-9a-f-]+$', identifier.lower()))
+    is_uuid_like = bool(re.match(r"^[0-9a-f-]+$", identifier.lower()))
 
-    if not is_uuid_like or len(identifier.replace('-', '')) < 8:
+    if not is_uuid_like or len(identifier.replace("-", "")) < 8:
         console.print("[red]Please provide a suit ID (at least 8 hex characters)[/red]")
         console.print("[dim]Use 'suits inventory <swimmer>' to find suit IDs[/dim]")
         raise typer.Exit(1)
@@ -2184,6 +2209,386 @@ def suits_stats(
             name = f"{model.get('brand', '?')} {model.get('model_name', '?')}"
             nickname = f" ({s['nickname']})" if s.get("nickname") else ""
             console.print(f"  - {name}{nickname}: {s.get('race_count', 0)} races")
+
+
+# =============================================================================
+# MEETS COMMANDS
+# =============================================================================
+
+meets_app = typer.Typer(help="Meet management", no_args_is_help=True)
+app.add_typer(meets_app, name="meets")
+
+
+def _resolve_meet(identifier: str) -> dict:
+    """Resolve a meet by ID (partial) or name.
+
+    Args:
+        identifier: Either a partial short ID or exact meet name
+
+    Returns:
+        Meet dict from API
+
+    Raises:
+        typer.Exit: If meet not found or ambiguous
+    """
+    import re
+
+    # Check if it looks like a short ID (alphanumeric)
+    is_id_like = bool(re.match(r"^[0-9a-z]+$", identifier.lower())) and len(identifier) >= 6
+
+    if is_id_like:
+        # Try partial ID match - fetch all meets and filter
+        response = cli_auth.api_request("GET", "/api/v1/meets?limit=500")
+        if response.status_code != 200:
+            console.print(f"[red]Error fetching meets: {response.text}[/red]")
+            raise typer.Exit(1)
+
+        meets = response.json()
+        matches = [m for m in meets if m["id"].startswith(identifier.lower())]
+
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            console.print(f"[red]Ambiguous ID '{identifier}' matches {len(matches)} meets:[/red]")
+            for m in matches[:5]:
+                console.print(f"  {m['id'][:8]}  {m['name']}")
+            raise typer.Exit(1)
+        # Fall through to try name match
+
+    # Try name match (search API does partial match)
+    response = cli_auth.api_request("GET", f"/api/v1/meets?name={identifier}&limit=10")
+    if response.status_code != 200:
+        console.print(f"[red]Error searching meets: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    meets = response.json()
+    # Look for exact name match
+    exact_matches = [m for m in meets if m["name"].lower() == identifier.lower()]
+
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    elif len(exact_matches) > 1:
+        console.print(f"[red]Multiple meets match '{identifier}'[/red]")
+        raise typer.Exit(1)
+
+    # No match found
+    console.print(f"[red]Meet not found: '{identifier}'[/red]")
+    console.print("[dim]Use a partial ID (min 6 chars) or exact meet name[/dim]")
+    raise typer.Exit(1)
+
+
+@meets_app.command("list")
+def meets_list(
+    name: str = typer.Option(None, "--name", "-n", help="Filter by name (partial match)"),
+    course: str = typer.Option(None, "--course", "-c", help="Filter by course (scy/scm/lcm)"),
+    meet_type: str = typer.Option(
+        None, "--type", "-t", help="Filter by type (championship/invitational/dual/time_trial)"
+    ),
+    sanctioning_body: str = typer.Option(
+        None,
+        "--body",
+        "-b",
+        help="Filter by sanctioning body (USA Swimming, NE Swimming, NEPSAC, NCAA, MIAA)",
+    ),
+    indoor: bool = typer.Option(None, "--indoor", "-i", help="Filter indoor meets"),
+    outdoor: bool = typer.Option(None, "--outdoor", "-o", help="Filter outdoor meets"),
+    limit: int = typer.Option(50, "--limit", help="Max results"),
+):
+    """List meets with optional filters."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Build query params
+    params = []
+    if name:
+        params.append(f"name={name}")
+    if course:
+        params.append(f"course={course.lower()}")
+    if meet_type:
+        params.append(f"meet_type={meet_type.lower()}")
+    if sanctioning_body:
+        params.append(f"sanctioning_body={sanctioning_body}")
+    if indoor:
+        params.append("indoor=true")
+    elif outdoor:
+        params.append("indoor=false")
+    params.append(f"limit={limit}")
+
+    query = "&".join(params)
+    path = f"/api/v1/meets?{query}"
+
+    with console.status("Fetching meets..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    meets = response.json()
+
+    if not meets:
+        console.print("[yellow]No meets found[/yellow]")
+        return
+
+    table = Table(title=f"Meets ({len(meets)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Date", no_wrap=True)
+    table.add_column("Location", no_wrap=True)
+    table.add_column("Course", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+
+    for meet in meets:
+        meet_type_val = meet.get("meet_type", "")
+        type_color = {
+            "championship": "yellow",
+            "invitational": "blue",
+            "dual": "green",
+            "time_trial": "magenta",
+        }.get(meet_type_val, "white")
+
+        course_val = meet.get("course", "").upper()
+
+        table.add_row(
+            meet["id"][:8],
+            meet["name"],
+            meet.get("start_date", "-"),
+            f"{meet.get('city', '')}, {meet.get('state', '')}".strip(", "),
+            course_val,
+            f"[{type_color}]{meet_type_val}[/{type_color}]",
+        )
+
+    console.print(table)
+
+
+@meets_app.command("get")
+def meets_get(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+):
+    """Get details for a specific meet."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    with console.status("Fetching meet..."):
+        meet = _resolve_meet(meet_ref)
+
+    table = Table(title="Meet Details")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+
+    table.add_row("ID", meet["id"])
+    table.add_row("Name", meet["name"])
+    table.add_row("Location", meet.get("location", "-"))
+    table.add_row("City", meet.get("city", "-"))
+    table.add_row("State", meet.get("state") or "-")
+    table.add_row("Country", meet.get("country") or "-")
+    table.add_row("Start Date", meet.get("start_date", "-"))
+    table.add_row("End Date", meet.get("end_date") or "-")
+    table.add_row("Course", meet.get("course", "-").upper())
+    table.add_row("Lanes", str(meet.get("lanes", "-")))
+    table.add_row("Indoor", "Yes" if meet.get("indoor") else "No")
+    table.add_row("Sanctioning Body", meet.get("sanctioning_body", "-"))
+    table.add_row("Type", meet.get("meet_type", "-"))
+
+    console.print(table)
+
+
+@meets_app.command("create")
+def meets_create(
+    name: str = typer.Option(..., "--name", "-n", help="Meet name"),
+    location: str = typer.Option(..., "--location", "-l", help="Venue name"),
+    city: str = typer.Option(..., "--city", help="City"),
+    course: str = typer.Option(..., "--course", "-c", help="Course (scy/scm/lcm)"),
+    sanctioning_body: str = typer.Option(
+        ...,
+        "--body",
+        "-b",
+        help="Sanctioning body (USA Swimming, NE Swimming, NEPSAC, NCAA, MIAA)",
+    ),
+    meet_type: str = typer.Option(
+        ..., "--type", "-t", help="Meet type (championship/invitational/dual/time_trial)"
+    ),
+    start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(None, "--end", "-e", help="End date (YYYY-MM-DD)"),
+    state: str = typer.Option(None, "--state", help="State"),
+    country: str = typer.Option("USA", "--country", help="Country"),
+    lanes: int = typer.Option(8, "--lanes", help="Number of lanes (6/8/10)"),
+    indoor: bool = typer.Option(True, "--indoor/--outdoor", help="Indoor or outdoor"),
+):
+    """Create a new meet (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    payload = {
+        "name": name,
+        "location": location,
+        "city": city,
+        "course": course.lower(),
+        "sanctioning_body": sanctioning_body,
+        "meet_type": meet_type.lower(),
+        "start_date": start_date,
+        "lanes": lanes,
+        "indoor": indoor,
+        "country": country,
+    }
+    if end_date:
+        payload["end_date"] = end_date
+    if state:
+        payload["state"] = state
+
+    with console.status("Creating meet..."):
+        response = cli_auth.api_request("POST", "/api/v1/meets", json_data=payload)
+
+    if response.status_code == 400:
+        err = response.json()
+        console.print(f"[red]Validation error: {err.get('detail', response.text)}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Meet name already exists')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    meet = response.json()
+    console.print("[green]Meet created![/green]")
+    console.print(f"ID: {meet['id']}")
+    console.print(f"Name: {meet['name']}")
+
+
+@meets_app.command("update")
+def meets_update(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+    name: str = typer.Option(None, "--name", "-n", help="New meet name"),
+    location: str = typer.Option(None, "--location", "-l", help="New venue name"),
+    city: str = typer.Option(None, "--city", help="New city"),
+    state: str = typer.Option(None, "--state", help="New state"),
+    start_date: str = typer.Option(None, "--start", "-s", help="New start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(None, "--end", "-e", help="New end date (YYYY-MM-DD)"),
+    course: str = typer.Option(None, "--course", "-c", help="New course (scy/scm/lcm)"),
+    lanes: int = typer.Option(None, "--lanes", help="New number of lanes"),
+    sanctioning_body: str = typer.Option(
+        None,
+        "--body",
+        "-b",
+        help="New sanctioning body (USA Swimming, NE Swimming, NEPSAC, NCAA, MIAA)",
+    ),
+):
+    """Update a meet (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve meet first
+    with console.status("Finding meet..."):
+        meet = _resolve_meet(meet_ref)
+    meet_id = meet["id"]
+
+    payload = {}
+    if name:
+        payload["name"] = name
+    if location:
+        payload["location"] = location
+    if city:
+        payload["city"] = city
+    if state:
+        payload["state"] = state
+    if start_date:
+        payload["start_date"] = start_date
+    if end_date:
+        payload["end_date"] = end_date
+    if course:
+        payload["course"] = course.lower()
+    if lanes:
+        payload["lanes"] = lanes
+    if sanctioning_body:
+        payload["sanctioning_body"] = sanctioning_body
+
+    if not payload:
+        console.print("[yellow]No updates provided[/yellow]")
+        raise typer.Exit(1)
+
+    with console.status("Updating meet..."):
+        response = cli_auth.api_request("PATCH", f"/api/v1/meets/{meet_id}", json_data=payload)
+
+    if response.status_code == 404:
+        console.print("[red]Meet not found[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 400:
+        err = response.json()
+        console.print(f"[red]Validation error: {err.get('detail', response.text)}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 409:
+        err = response.json()
+        console.print(f"[red]{err.get('detail', 'Meet name already exists')}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    meet = response.json()
+    console.print("[green]Meet updated![/green]")
+    console.print(f"Name: {meet['name']}")
+
+
+@meets_app.command("delete")
+def meets_delete(
+    meet_ref: str = typer.Argument(..., help="Meet ID (partial) or name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a meet (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve meet first
+    with console.status("Finding meet..."):
+        meet = _resolve_meet(meet_ref)
+    meet_id = meet["id"]
+
+    if not force and not typer.confirm(f"Delete meet '{meet['name']}'?"):
+        console.print("[yellow]Cancelled[/yellow]")
+        raise typer.Exit(0)
+
+    with console.status("Deleting meet..."):
+        response = cli_auth.api_request("DELETE", f"/api/v1/meets/{meet_id}")
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 204:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Meet '{meet['name']}' deleted[/green]")
 
 
 def main():
