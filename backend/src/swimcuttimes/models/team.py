@@ -2,7 +2,6 @@
 
 from datetime import date
 from enum import StrEnum
-from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -20,7 +19,7 @@ class TeamType(StrEnum):
 class Team(BaseModel):
     """A swimming team or organization."""
 
-    id: UUID | None = None
+    id: str | None = None
     name: str
     team_type: TeamType
     sanctioning_body: str  # e.g., "USA Swimming", "NCAA D1", "FINA"
@@ -43,9 +42,9 @@ class SwimmerTeam(BaseModel):
     - Historical tracking of team changes
     """
 
-    id: UUID | None = None
-    swimmer_id: UUID
-    team_id: UUID
+    id: str | None = None
+    swimmer_id: str
+    team_id: str
     start_date: date
     end_date: date | None = None  # None = current membership
 

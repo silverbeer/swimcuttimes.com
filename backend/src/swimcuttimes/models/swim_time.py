@@ -2,7 +2,6 @@
 
 from datetime import date
 from enum import StrEnum
-from uuid import UUID
 
 from pydantic import BaseModel, computed_field, field_validator
 
@@ -21,8 +20,8 @@ class Split(BaseModel):
         Split(distance=150, time_centiseconds=8919)  # 1:29.19 at 150m
     """
 
-    id: UUID | None = None
-    swim_time_id: UUID | None = None  # Foreign key to SwimTime
+    id: str | None = None
+    swim_time_id: str | None = None  # Foreign key to SwimTime
 
     distance: int  # Cumulative distance (50, 100, 150, etc.)
     time_centiseconds: int  # Cumulative time at this distance
@@ -51,20 +50,20 @@ class SwimTime(BaseModel):
     details including round, lane, and result.
     """
 
-    id: UUID | None = None
+    id: str | None = None
 
     # Required references
-    swimmer_id: UUID
-    event_id: UUID
-    meet_id: UUID
+    swimmer_id: str
+    event_id: str
+    meet_id: str
 
     # The time (stored as centiseconds for precision)
     time_centiseconds: int
 
     # When and where
     swim_date: date
-    team_id: UUID  # Team swimmer represented at time of swim
-    suit_id: UUID | None = None  # Racing suit worn during this swim (optional)
+    team_id: str  # Team swimmer represented at time of swim
+    suit_id: str | None = None  # Racing suit worn during this swim (optional)
 
     # Competition details (optional)
     round: Round | None = None

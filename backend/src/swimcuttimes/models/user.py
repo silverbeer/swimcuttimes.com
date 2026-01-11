@@ -43,11 +43,11 @@ class FollowStatus(StrEnum):
 class UserProfile(BaseModel):
     """User profile extending Supabase auth."""
 
-    id: UUID
+    id: UUID  # Same as auth.users.id (1:1 relationship, stays UUID)
     role: UserRole = UserRole.FAN
     display_name: str | None = None
     avatar_url: str | None = None
-    swimmer_id: UUID | None = None  # Link to swimmer record if applicable
+    swimmer_id: str | None = None  # Link to swimmer record (short ID)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -81,16 +81,16 @@ class UserProfile(BaseModel):
 class Invitation(BaseModel):
     """Invitation for new user registration."""
 
-    id: UUID | None = None
-    inviter_id: UUID
+    id: str | None = None  # Short ID
+    inviter_id: UUID  # References auth.users (stays UUID)
     email: EmailStr
     role: UserRole
     token: str | None = None  # Only visible to inviter/admin
     status: InvitationStatus = InvitationStatus.PENDING
     expires_at: datetime | None = None
-    accepted_by: UUID | None = None
+    accepted_by: UUID | None = None  # References auth.users (stays UUID)
     accepted_at: datetime | None = None
-    team_id: UUID | None = None
+    team_id: str | None = None  # References teams (short ID)
     created_at: datetime | None = None
 
 
@@ -99,16 +99,16 @@ class InvitationCreate(BaseModel):
 
     email: EmailStr
     role: UserRole
-    team_id: UUID | None = None
+    team_id: str | None = None  # References teams (short ID)
 
 
 class FanFollow(BaseModel):
     """Fan-swimmer follow relationship."""
 
-    id: UUID | None = None
-    fan_id: UUID
-    swimmer_id: UUID
-    initiated_by: UUID
+    id: str | None = None  # Short ID
+    fan_id: UUID  # References auth.users (stays UUID)
+    swimmer_id: str  # References swimmers (short ID)
+    initiated_by: UUID  # References auth.users (stays UUID)
     status: FollowStatus = FollowStatus.PENDING
     created_at: datetime | None = None
     responded_at: datetime | None = None
@@ -127,7 +127,7 @@ class FanFollow(BaseModel):
 class FollowRequest(BaseModel):
     """Request from fan to follow a swimmer."""
 
-    swimmer_id: UUID
+    swimmer_id: str  # References swimmers (short ID)
 
 
 class FollowInvite(BaseModel):

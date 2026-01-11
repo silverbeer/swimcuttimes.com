@@ -1,7 +1,6 @@
 """Time standard models for qualifying times."""
 
 from datetime import date
-from uuid import UUID
 
 from pydantic import BaseModel, computed_field
 
@@ -18,7 +17,7 @@ class TimeStandard(BaseModel):
     - NCAA D1 Qualifying 200 IM SCY: 1:44.59
     """
 
-    id: UUID | None = None
+    id: str | None = None
 
     # Event identification
     event: Event

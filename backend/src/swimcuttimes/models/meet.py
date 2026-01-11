@@ -2,7 +2,6 @@
 
 from datetime import date
 from enum import StrEnum
-from uuid import UUID
 
 from pydantic import BaseModel, field_validator
 
@@ -21,7 +20,7 @@ class MeetType(StrEnum):
 class Meet(BaseModel):
     """A swim meet/competition."""
 
-    id: UUID | None = None
+    id: str | None = None
     name: str
     location: str  # Venue name
     city: str

@@ -2,7 +2,6 @@
 
 from datetime import date
 from enum import StrEnum
-from uuid import UUID
 
 from pydantic import BaseModel, computed_field
 
@@ -33,7 +32,7 @@ class SuitModel(BaseModel):
     Both tech suits ($200-$500+) and regular racing suits ($30-$100) are tracked.
     """
 
-    id: UUID | None = None
+    id: str | None = None
     brand: str  # e.g., "Speedo", "Arena", "TYR"
     model_name: str  # e.g., "LZR Pure Intent", "Carbon Core FX"
     suit_type: SuitType
@@ -72,9 +71,9 @@ class SwimmerSuit(BaseModel):
     and purchase details.
     """
 
-    id: UUID | None = None
-    swimmer_id: UUID
-    suit_model_id: UUID
+    id: str | None = None
+    swimmer_id: str
+    suit_model_id: str
     nickname: str | None = None  # e.g., "Lucky Suit", "Championship Suit"
     size: str | None = None  # e.g., "26", "28", "30"
     color: str | None = None  # e.g., "Black/Gold", "Navy"

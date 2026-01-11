@@ -1,7 +1,6 @@
 """Event models and enums for swimming events."""
 
 from enum import StrEnum
-from uuid import UUID
 
 from pydantic import BaseModel, model_validator
 
@@ -49,7 +48,7 @@ METERS_ONLY_DISTANCES = {400, 800, 1500}  # Meters only (SCM/LCM)
 class Event(BaseModel):
     """A swimming event (e.g., 100 Freestyle SCY)."""
 
-    id: UUID | None = None
+    id: str | None = None
     stroke: Stroke
     distance: int
     course: Course

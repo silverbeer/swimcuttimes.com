@@ -17,12 +17,12 @@ class Gender(StrEnum):
 class Swimmer(BaseModel):
     """A competitive swimmer."""
 
-    id: UUID | None = None
+    id: str | None = None
     first_name: str
     last_name: str
     date_of_birth: date
     gender: Gender
-    user_id: UUID | None = None  # Link to app user account (optional)
+    user_id: UUID | None = None  # Link to Supabase auth.users (stays UUID)
     usa_swimming_id: str | None = None  # USA Swimming member ID
     swimcloud_url: str | None = None  # e.g., "https://www.swimcloud.com/swimmer/123456/"
 
