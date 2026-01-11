@@ -2282,7 +2282,10 @@ def meets_list(
     name: str = typer.Option(None, "--name", "-n", help="Filter by name (partial match)"),
     course: str = typer.Option(None, "--course", "-c", help="Filter by course (scy/scm/lcm)"),
     meet_type: str = typer.Option(
-        None, "--type", "-t", help="Filter by type (championship/invitational/dual/time_trial)"
+        None,
+        "--type",
+        "-t",
+        help="Type: invitational (regular meets), championship (LSC/Sectionals/Nationals), dual, time_trial",
     ),
     sanctioning_body: str = typer.Option(
         None,
@@ -2412,7 +2415,10 @@ def meets_create(
         help="Sanctioning body (USA Swimming, NE Swimming, NEPSAC, NCAA, MIAA)",
     ),
     meet_type: str = typer.Option(
-        ..., "--type", "-t", help="Meet type (championship/invitational/dual/time_trial)"
+        ...,
+        "--type",
+        "-t",
+        help="Type: invitational (regular meets), championship (LSC/Sectionals/Nationals), dual, time_trial",
     ),
     start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end_date: str = typer.Option(None, "--end", "-e", help="End date (YYYY-MM-DD)"),
