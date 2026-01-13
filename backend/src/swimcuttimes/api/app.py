@@ -15,13 +15,16 @@ from fastapi import FastAPI
 from swimcuttimes import configure_logging, get_logger
 from swimcuttimes.api.routes import (
     auth_router,
+    events_router,
     follows_router,
     health_router,
     meets_router,
     suits_router,
     swimmers_router,
     teams_router,
+    time_standard_definitions_router,
     time_standards_router,
+    times_router,
 )
 from swimcuttimes.config import get_settings
 
@@ -58,12 +61,15 @@ def create_app() -> FastAPI:
     # Register routes
     app.include_router(health_router)
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(events_router, prefix="/api/v1")
     app.include_router(follows_router, prefix="/api/v1")
     app.include_router(meets_router, prefix="/api/v1")
     app.include_router(suits_router, prefix="/api/v1")
     app.include_router(swimmers_router, prefix="/api/v1")
     app.include_router(teams_router, prefix="/api/v1")
+    app.include_router(time_standard_definitions_router, prefix="/api/v1")
     app.include_router(time_standards_router, prefix="/api/v1")
+    app.include_router(times_router, prefix="/api/v1")
 
     return app
 

@@ -22,6 +22,7 @@ from swimcuttimes.dao.swim_time_dao import SwimTimeDAO
 from swimcuttimes.dao.swimmer_dao import SwimmerDAO
 from swimcuttimes.dao.team_dao import SwimmerTeamDAO, TeamDAO
 from swimcuttimes.dao.time_standard_dao import TimeStandardDAO
+from swimcuttimes.dao.time_standard_definition_dao import TimeStandardDefinitionDAO
 
 
 def get_settings_dep() -> Settings:
@@ -64,6 +65,11 @@ def get_time_standard_dao(client: SupabaseDep) -> TimeStandardDAO:
     return TimeStandardDAO(client)
 
 
+def get_time_standard_definition_dao(client: SupabaseDep) -> TimeStandardDefinitionDAO:
+    """Get TimeStandardDefinitionDAO instance."""
+    return TimeStandardDefinitionDAO(client)
+
+
 def get_swimmer_dao(client: SupabaseDep) -> SwimmerDAO:
     """Get SwimmerDAO instance."""
     return SwimmerDAO(client)
@@ -97,6 +103,7 @@ def get_swimmer_suit_dao(client: SupabaseDep) -> SwimmerSuitDAO:
 EventDAODep = Annotated[EventDAO, Depends(get_event_dao)]
 TeamDAODep = Annotated[TeamDAO, Depends(get_team_dao)]
 TimeStandardDAODep = Annotated[TimeStandardDAO, Depends(get_time_standard_dao)]
+TimeStandardDefinitionDAODep = Annotated[TimeStandardDefinitionDAO, Depends(get_time_standard_definition_dao)]
 SwimmerDAODep = Annotated[SwimmerDAO, Depends(get_swimmer_dao)]
 SwimmerTeamDAODep = Annotated[SwimmerTeamDAO, Depends(get_swimmer_team_dao)]
 MeetDAODep = Annotated[MeetDAO, Depends(get_meet_dao)]

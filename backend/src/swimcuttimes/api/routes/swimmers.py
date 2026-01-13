@@ -53,12 +53,12 @@ class SwimmerUpdate(BaseModel):
 class SwimmerResponse(BaseModel):
     """Response model for swimmer with computed fields."""
 
-    id: UUID
+    id: str  # Short ID (TEXT), not UUID
     first_name: str
     last_name: str
     date_of_birth: date
     gender: Gender
-    user_id: UUID | None
+    user_id: UUID | None  # Still UUID (references auth.users)
     usa_swimming_id: str | None
     swimcloud_url: str | None
     age: int
@@ -84,16 +84,16 @@ class SwimmerResponse(BaseModel):
 class TeamAssignment(BaseModel):
     """Request to assign swimmer to team."""
 
-    team_id: UUID
+    team_id: str  # Short ID (TEXT), not UUID
     start_date: date = Field(default_factory=date.today)
 
 
 class SwimmerTeamResponse(BaseModel):
     """Response for swimmer-team association."""
 
-    id: UUID
-    swimmer_id: UUID
-    team_id: UUID
+    id: str  # Short ID (TEXT), not UUID
+    swimmer_id: str  # Short ID (TEXT), not UUID
+    team_id: str  # Short ID (TEXT), not UUID
     team_name: str
     start_date: date
     end_date: date | None
@@ -183,7 +183,7 @@ def list_swimmers(
 
 @router.get("/{swimmer_id}", response_model=SwimmerResponse)
 def get_swimmer(
-    swimmer_id: UUID,
+    swimmer_id: str,  # Short ID (TEXT), not UUID
     user: CurrentUser,
     dao: SwimmerDAODep,
 ) -> SwimmerResponse:
@@ -201,7 +201,7 @@ def get_swimmer(
 
 @router.patch("/{swimmer_id}", response_model=SwimmerResponse)
 def update_swimmer(
-    swimmer_id: UUID,
+    swimmer_id: str,  # Short ID (TEXT), not UUID
     data: SwimmerUpdate,
     user: AdminOrCoachUser,
     dao: SwimmerDAODep,
@@ -251,7 +251,7 @@ def update_swimmer(
 
 @router.delete("/{swimmer_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_swimmer(
-    swimmer_id: UUID,
+    swimmer_id: str,  # Short ID (TEXT), not UUID
     user: AdminUser,
     dao: SwimmerDAODep,
 ) -> None:
@@ -292,7 +292,7 @@ def delete_swimmer(
     status_code=status.HTTP_201_CREATED,
 )
 def assign_swimmer_to_team(
-    swimmer_id: UUID,
+    swimmer_id: str,  # Short ID (TEXT), not UUID
     data: TeamAssignment,
     user: AdminOrCoachUser,
     swimmer_dao: SwimmerDAODep,
@@ -362,7 +362,7 @@ def assign_swimmer_to_team(
 
 @router.get("/{swimmer_id}/teams", response_model=list[SwimmerTeamResponse])
 def list_swimmer_teams(
-    swimmer_id: UUID,
+    swimmer_id: str,  # Short ID (TEXT), not UUID
     user: CurrentUser,
     swimmer_dao: SwimmerDAODep,
     team_dao: TeamDAODep,
@@ -402,8 +402,8 @@ def list_swimmer_teams(
 
 @router.delete("/{swimmer_id}/teams/{team_id}", status_code=status.HTTP_200_OK)
 def end_swimmer_team_membership(
-    swimmer_id: UUID,
-    team_id: UUID,
+    swimmer_id: str,  # Short ID (TEXT), not UUID
+    team_id: str,  # Short ID (TEXT), not UUID
     user: AdminOrCoachUser,
     swimmer_dao: SwimmerDAODep,
     team_dao: TeamDAODep,

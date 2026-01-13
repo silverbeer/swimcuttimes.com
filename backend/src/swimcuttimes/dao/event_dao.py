@@ -1,7 +1,5 @@
 """Data Access Object for Events."""
 
-from uuid import UUID
-
 from supabase import Client
 from swimcuttimes.dao.base import BaseDAO
 from swimcuttimes.models.event import Course, Event, Stroke
@@ -96,7 +94,7 @@ class EventDAO(BaseDAO[Event]):
         result = self.table.select("*").eq("distance", distance).execute()
         return [self._to_model(row) for row in result.data]
 
-    def get_event_id(self, stroke: Stroke, distance: int, course: Course) -> UUID | None:
+    def get_event_id(self, stroke: Stroke, distance: int, course: Course) -> str | None:
         """Get just the ID for an event.
 
         Args:
@@ -105,7 +103,7 @@ class EventDAO(BaseDAO[Event]):
             course: The course type (SCY, SCM, LCM)
 
         Returns:
-            The event's UUID or None if not found
+            The event's ID (short ID string) or None if not found
         """
         result = (
             self.table.select("id")
@@ -118,12 +116,12 @@ class EventDAO(BaseDAO[Event]):
         if not result.data:
             return None
 
-        return UUID(result.data[0]["id"])
+        return result.data[0]["id"]
 
     def _to_model(self, row: dict) -> Event:
         """Convert database row to Event model."""
         return Event(
-            id=UUID(row["id"]) if row.get("id") else None,
+            id=row["id"] if row.get("id") else None,
             stroke=Stroke(row["stroke"]),
             distance=row["distance"],
             course=Course(row["course"]),

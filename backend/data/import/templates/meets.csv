@@ -1,0 +1,4 @@
+name,location,city,state,start_date,end_date,course,sanctioning_body,meet_type,lanes,indoor
+# Example rows (remove these and add your data):
+2024 Summer Championship,Harvard Pool,Boston,MA,2024-07-15,2024-07-17,lcm,NE Swimming,championship,8,true
+Winter Invitational,YMCA Pool,Cambridge,MA,2024-01-20,,scy,USA Swimming,invitational,6,true

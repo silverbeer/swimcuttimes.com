@@ -79,6 +79,82 @@ class SwimmerDAO(BaseDAO[Swimmer]):
 
         return self._to_model(result.data[0])
 
+    def find_by_name_and_dob(
+        self, first_name: str, last_name: str, date_of_birth: date
+    ) -> Swimmer | None:
+        """Find a swimmer by exact name and date of birth.
+
+        Args:
+            first_name: First name (case-insensitive)
+            last_name: Last name (case-insensitive)
+            date_of_birth: Date of birth
+
+        Returns:
+            The Swimmer or None if not found
+        """
+        result = (
+            self.table.select("*")
+            .ilike("first_name", first_name)
+            .ilike("last_name", last_name)
+            .eq("date_of_birth", date_of_birth.isoformat())
+            .execute()
+        )
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
+
+    def find_or_create(
+        self,
+        first_name: str,
+        last_name: str,
+        date_of_birth: date,
+        gender: Gender,
+        usa_swimming_id: str | None = None,
+    ) -> tuple[Swimmer, bool]:
+        """Find an existing swimmer or create a new one.
+
+        Matching priority:
+        1. USA Swimming ID (if provided)
+        2. first_name + last_name + date_of_birth
+
+        Args:
+            first_name: Swimmer's first name
+            last_name: Swimmer's last name
+            date_of_birth: Swimmer's date of birth
+            gender: Swimmer's gender
+            usa_swimming_id: Optional USA Swimming member ID
+
+        Returns:
+            Tuple of (swimmer, was_created) where was_created is True if new
+        """
+        # Try to find by USA Swimming ID first (most reliable)
+        if usa_swimming_id:
+            existing = self.find_by_usa_swimming_id(usa_swimming_id)
+            if existing:
+                return (existing, False)
+
+        # Try to find by name + DOB
+        existing = self.find_by_name_and_dob(first_name, last_name, date_of_birth)
+        if existing:
+            # If we have a USA Swimming ID and the existing record doesn't, update it
+            if usa_swimming_id and not existing.usa_swimming_id:
+                self.partial_update(existing.id, {"usa_swimming_id": usa_swimming_id})
+                existing.usa_swimming_id = usa_swimming_id
+            return (existing, False)
+
+        # Create new swimmer
+        new_swimmer = Swimmer(
+            first_name=first_name,
+            last_name=last_name,
+            date_of_birth=date_of_birth,
+            gender=gender,
+            usa_swimming_id=usa_swimming_id,
+        )
+        created = self.create(new_swimmer)
+        return (created, True)
+
     def find_by_gender(self, gender: Gender) -> list[Swimmer]:
         """Find all swimmers of a specific gender.
 
@@ -195,12 +271,12 @@ class SwimmerDAO(BaseDAO[Swimmer]):
     def _to_model(self, row: dict) -> Swimmer:
         """Convert database row to Swimmer model."""
         return Swimmer(
-            id=UUID(row["id"]) if row.get("id") else None,
+            id=row["id"] if row.get("id") else None,  # Short ID (TEXT), not UUID
             first_name=row["first_name"],
             last_name=row["last_name"],
             date_of_birth=date.fromisoformat(row["date_of_birth"]),
             gender=Gender(row["gender"]),
-            user_id=UUID(row["user_id"]) if row.get("user_id") else None,
+            user_id=UUID(row["user_id"]) if row.get("user_id") else None,  # Still UUID (references auth.users)
             usa_swimming_id=row.get("usa_swimming_id"),
             swimcloud_url=row.get("swimcloud_url"),
         )

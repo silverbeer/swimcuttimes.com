@@ -29,6 +29,66 @@ class TeamDAO(BaseDAO[Team]):
         result = self.table.select("*").ilike("name", f"%{name}%").execute()
         return [self._to_model(row) for row in result.data]
 
+    def find_by_exact_name(self, name: str) -> Team | None:
+        """Find a team by exact name (case-insensitive).
+
+        Args:
+            name: Exact team name
+
+        Returns:
+            The Team or None if not found
+        """
+        result = self.table.select("*").ilike("name", name).execute()
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
+
+    def find_or_create(
+        self,
+        name: str,
+        team_type: TeamType,
+        sanctioning_body: str,
+        lsc: str | None = None,
+        division: str | None = None,
+        state: str | None = None,
+        country: str | None = None,
+    ) -> tuple[Team, bool]:
+        """Find an existing team or create a new one.
+
+        Matching is done by exact name (case-insensitive).
+
+        Args:
+            name: Team name
+            team_type: Type of team
+            sanctioning_body: Sanctioning organization
+            lsc: LSC code for club teams
+            division: Division for college teams
+            state: State for high school teams
+            country: Country for national/olympic teams
+
+        Returns:
+            Tuple of (team, was_created) where was_created is True if new
+        """
+        # Try to find existing team
+        existing = self.find_by_exact_name(name)
+        if existing:
+            return (existing, False)
+
+        # Create new team
+        new_team = Team(
+            name=name,
+            team_type=team_type,
+            sanctioning_body=sanctioning_body,
+            lsc=lsc,
+            division=division,
+            state=state,
+            country=country,
+        )
+        created = self.create(new_team)
+        return (created, True)
+
     def find_by_type(self, team_type: TeamType) -> list[Team]:
         """Find all teams of a specific type.
 
@@ -168,7 +228,7 @@ class TeamDAO(BaseDAO[Team]):
     def _to_model(self, row: dict) -> Team:
         """Convert database row to Team model."""
         return Team(
-            id=UUID(row["id"]) if row.get("id") else None,
+            id=row["id"] if row.get("id") else None,  # Short ID (TEXT), not UUID
             name=row["name"],
             team_type=TeamType(row["team_type"]),
             sanctioning_body=row["sanctioning_body"],
@@ -321,9 +381,9 @@ class SwimmerTeamDAO(BaseDAO[SwimmerTeam]):
     def _to_model(self, row: dict) -> SwimmerTeam:
         """Convert database row to SwimmerTeam model."""
         return SwimmerTeam(
-            id=UUID(row["id"]) if row.get("id") else None,
-            swimmer_id=UUID(row["swimmer_id"]),
-            team_id=UUID(row["team_id"]),
+            id=row["id"] if row.get("id") else None,  # Short ID (TEXT), not UUID
+            swimmer_id=row["swimmer_id"],  # Short ID (TEXT), not UUID
+            team_id=row["team_id"],  # Short ID (TEXT), not UUID
             start_date=date.fromisoformat(row["start_date"]),
             end_date=date.fromisoformat(row["end_date"]) if row.get("end_date") else None,
         )

@@ -196,9 +196,10 @@ def _parse_image_to_json(image_path: Path) -> Path:
 def _load_json_to_db(json_path: Path) -> None:
     """Load time standards from JSON file into database."""
     import json
+    from datetime import datetime
 
     from swimcuttimes.models import Course, Gender, Stroke
-    from swimcuttimes.parser import convert_sheet_to_time_standards
+    from swimcuttimes.parser import convert_sheet_to_definition, convert_sheet_to_time_standards
     from swimcuttimes.parser.schemas import ParsedTimeEntry, ParsedTimeStandardSheet
 
     # Load JSON
@@ -228,8 +229,49 @@ def _load_json_to_db(json_path: Path) -> None:
         entries=entries,
     )
 
-    # Convert to time standards
-    standards = convert_sheet_to_time_standards(sheet)
+    # Parse dates for definition
+    def parse_date(date_str: str | None) -> str | None:
+        if not date_str:
+            return None
+        # Try common formats
+        formats = ["%B %d, %Y", "%b %d, %Y", "%m/%d/%Y", "%Y-%m-%d"]
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str.strip(), fmt).date().isoformat()
+            except ValueError:
+                continue
+        return None
+
+    # Step 1: Create/get the definition
+    console.print()
+    console.print("[cyan]Creating time standard definition...[/cyan]")
+    definition_response = cli_auth.api_request(
+        "POST",
+        "/api/v1/time-standard-definitions",
+        json_data={
+            "standard_name": sheet.standard_name,
+            "sanctioning_body": sheet.sanctioning_body,
+            "effective_year": sheet.effective_year,
+            "qualifying_period_start": parse_date(sheet.qualifying_period_start),
+            "qualifying_period_end": parse_date(sheet.qualifying_period_end),
+            "age_group": sheet.age_group,
+        },
+    )
+
+    if definition_response.status_code not in (200, 201):
+        try:
+            detail = definition_response.json().get("detail", definition_response.text)
+        except Exception:
+            detail = definition_response.text
+        console.print(f"[red]Failed to create definition: {detail}[/red]")
+        raise typer.Exit(1)
+
+    definition = definition_response.json()
+    definition_id = definition["id"]
+    console.print(f"[green]✓ Definition created: {definition['standard_name']} ({definition_id})[/green]")
+
+    # Step 2: Convert to time standards (with definition_id)
+    standards = convert_sheet_to_time_standards(sheet, definition_id)
 
     # Pivot for preview - group by event/gender to show both cut levels
     pivoted = _pivot_standards_models(standards)
@@ -249,7 +291,7 @@ def _load_json_to_db(json_path: Path) -> None:
         console.print("[yellow]Cancelled[/yellow]")
         raise typer.Exit(0)
 
-    # Import via API
+    # Step 3: Import time standards via API
     imported = 0
     errors = 0
     error_messages: list[str] = []
@@ -262,6 +304,7 @@ def _load_json_to_db(json_path: Path) -> None:
                 "POST",
                 "/api/v1/time-standards",
                 json_data={
+                    "definition_id": ts.definition_id,
                     "event": {
                         "stroke": ts.event.stroke.value,
                         "distance": ts.event.distance,
@@ -269,11 +312,8 @@ def _load_json_to_db(json_path: Path) -> None:
                     },
                     "gender": ts.gender.value,
                     "age_group": ts.age_group,
-                    "standard_name": ts.standard_name,
                     "cut_level": ts.cut_level,
-                    "sanctioning_body": ts.sanctioning_body,
                     "time_centiseconds": ts.time_centiseconds,
-                    "effective_year": ts.effective_year,
                 },
             )
 
@@ -404,12 +444,15 @@ def _pivot_time_standards(standards: list[dict]) -> list[dict]:
     """
     from collections import defaultdict
 
-    # Group by event + gender + age_group
+    # Group by event + gender + age_group + standard_name + sanctioning_body
+    # This ensures different standards (e.g., Silvers vs Seniors) are shown separately
     grouped: dict[tuple, dict] = defaultdict(
         lambda: {
             "event": None,
             "gender": None,
             "age_group": None,
+            "standard_name": None,
+            "sanctioning_body": None,
             "cut_off_time": "-",
             "cut_time": "-",
         }
@@ -417,18 +460,34 @@ def _pivot_time_standards(standards: list[dict]) -> list[dict]:
 
     for ts in standards:
         event = ts.get("event", {})
+        
+        # Extract definition data - could be nested or flattened
+        definition = ts.get("definition") or ts.get("time_standard_definitions") or {}
+        standard_name = definition.get("standard_name") if isinstance(definition, dict) else None
+        sanctioning_body = definition.get("sanctioning_body") if isinstance(definition, dict) else None
+        
+        # Fallback: try direct fields (for backward compatibility or flattened responses)
+        if not standard_name:
+            standard_name = ts.get("standard_name")
+        if not sanctioning_body:
+            sanctioning_body = ts.get("sanctioning_body")
+        
         key = (
             event.get("distance"),
             event.get("stroke"),
             event.get("course"),
             ts.get("gender"),
             ts.get("age_group"),
+            standard_name,
+            sanctioning_body,
         )
 
         row = grouped[key]
         row["event"] = event
         row["gender"] = ts.get("gender")
         row["age_group"] = ts.get("age_group")
+        row["standard_name"] = standard_name or "-"
+        row["sanctioning_body"] = sanctioning_body or "-"
 
         cut_level = ts.get("cut_level", "").lower()
         time_str = ts.get("time_formatted", "-")
@@ -444,6 +503,8 @@ def _pivot_time_standards(standards: list[dict]) -> list[dict]:
 def _make_ts_table(title: str, rows: list[dict]) -> Table:
     """Create a time standards table with Cut Off Time and Cut Time columns."""
     table = Table(title=title)
+    table.add_column("Standard", style="bold cyan")
+    table.add_column("Body", style="dim")
     table.add_column("Event", style="cyan")
     table.add_column("Course", style="magenta")
     table.add_column("Gender")
@@ -472,6 +533,8 @@ def _make_ts_table(title: str, rows: list[dict]) -> Table:
         event_str = f"{dist} {stroke}"
 
         table.add_row(
+            row.get("standard_name", "-"),
+            row.get("sanctioning_body", "-"),
             event_str,
             course,
             str(row.get("gender", "-")).upper(),
@@ -499,6 +562,12 @@ def ts_list(
     age_group: str = typer.Option(
         None, "--age", "-a", help="Filter by age group (e.g., 10-under, 11-12, 13-14, 15-18, Open)"
     ),
+    standard_name: str = typer.Option(
+        None, "--standard", help="Filter by standard name (e.g., 'Silver Championship', 'Senior Championship')"
+    ),
+    sanctioning_body: str = typer.Option(
+        None, "--body", help="Filter by sanctioning body (e.g., 'New England Swimming')"
+    ),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
 ):
     """List time standards."""
@@ -508,21 +577,27 @@ def ts_list(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None
 
-    # Build query params
-    params = []
-    if gender:
-        params.append(f"gender={gender.upper()}")
-    if stroke:
-        params.append(f"stroke={stroke.lower()}")
-    if course:
-        params.append(f"course={course.lower()}")
-    if distance:
-        params.append(f"distance={distance}")
-    if age_group:
-        params.append(f"age_group={age_group}")
-    params.append(f"limit={limit}")
+    # Build query params with proper URL encoding
+    from urllib.parse import urlencode
 
-    query = "&".join(params)
+    query_params = {}
+    if gender:
+        query_params["gender"] = gender.upper()
+    if stroke:
+        query_params["stroke"] = stroke.lower()
+    if course:
+        query_params["course"] = course.lower()
+    if distance:
+        query_params["distance"] = distance
+    if age_group:
+        query_params["age_group"] = age_group
+    if standard_name:
+        query_params["standard_name"] = standard_name
+    if sanctioning_body:
+        query_params["sanctioning_body"] = sanctioning_body
+    query_params["limit"] = limit
+
+    query = urlencode(query_params)
     path = f"/api/v1/time-standards?{query}"
 
     with console.status("Fetching time standards..."):
@@ -2595,6 +2670,1057 @@ def meets_delete(
         raise typer.Exit(1)
 
     console.print(f"[green]Meet '{meet['name']}' deleted[/green]")
+
+
+# =============================================================================
+# EVENTS COMMANDS
+# =============================================================================
+
+events_app = typer.Typer(help="Event management (read-only)", no_args_is_help=True)
+app.add_typer(events_app, name="events")
+
+
+@events_app.command("list")
+def events_list(
+    stroke: str = typer.Option(None, "--stroke", "-s", help="Filter by stroke (free/back/breast/fly/im)"),
+    course: str = typer.Option(None, "--course", "-c", help="Filter by course (scy/scm/lcm)"),
+    distance: int = typer.Option(None, "--distance", "-d", help="Filter by distance"),
+    limit: int = typer.Option(100, "--limit", help="Max results"),
+):
+    """List available events."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    params = []
+    if stroke:
+        params.append(f"stroke={stroke.lower()}")
+    if course:
+        params.append(f"course={course.lower()}")
+    if distance:
+        params.append(f"distance={distance}")
+    params.append(f"limit={limit}")
+
+    query = "&".join(params)
+    path = f"/api/v1/events?{query}"
+
+    with console.status("Fetching events..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    events = response.json()
+
+    if not events:
+        console.print("[yellow]No events found[/yellow]")
+        return
+
+    table = Table(title=f"Events ({len(events)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Event", style="cyan", no_wrap=True)
+    table.add_column("Distance", no_wrap=True)
+    table.add_column("Stroke", no_wrap=True)
+    table.add_column("Course", no_wrap=True)
+
+    for e in events:
+        stroke_val = e.get("stroke", "")
+        course_val = e.get("course", "").upper()
+        distance_val = e.get("distance", 0)
+
+        # Build event name
+        stroke_short = {
+            "freestyle": "Free",
+            "backstroke": "Back",
+            "breaststroke": "Breast",
+            "butterfly": "Fly",
+            "im": "IM",
+        }.get(stroke_val, stroke_val.title())
+
+        event_name = f"{distance_val} {stroke_short} {course_val}"
+
+        table.add_row(
+            e["id"][:12],
+            event_name,
+            str(distance_val),
+            stroke_val.title(),
+            course_val,
+        )
+
+    console.print(table)
+
+
+# =============================================================================
+# TIMES COMMANDS
+# =============================================================================
+
+times_app = typer.Typer(help="Swim time management", no_args_is_help=True)
+app.add_typer(times_app, name="times")
+
+
+@times_app.command("list")
+def times_list(
+    swimmer: str = typer.Option(None, "--swimmer", "-s", help="Filter by swimmer ID"),
+    event: str = typer.Option(None, "--event", "-e", help="Filter by event ID"),
+    meet: str = typer.Option(None, "--meet", "-m", help="Filter by meet ID"),
+    team: str = typer.Option(None, "--team", "-t", help="Filter by team ID"),
+    round: str = typer.Option(
+        None,
+        "--round",
+        "-r",
+        help="Filter by round (prelims/finals/consolation/bonus_finals/time_trial)",
+    ),
+    include_dq: bool = typer.Option(False, "--include-dq", help="Include DQ times"),
+    include_unofficial: bool = typer.Option(
+        False, "--include-unofficial", help="Include unofficial times"
+    ),
+    start_date: str = typer.Option(None, "--start", help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(None, "--end", help="End date (YYYY-MM-DD)"),
+    limit: int = typer.Option(50, "--limit", help="Max results"),
+):
+    """List swim times with optional filters."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Build query params
+    params = []
+    if swimmer:
+        params.append(f"swimmer_id={swimmer}")
+    if event:
+        params.append(f"event_id={event}")
+    if meet:
+        params.append(f"meet_id={meet}")
+    if team:
+        params.append(f"team_id={team}")
+    if round:
+        params.append(f"round={round.lower()}")
+    if include_dq:
+        params.append("exclude_dq=false")
+    if include_unofficial:
+        params.append("official_only=false")
+    if start_date:
+        params.append(f"start_date={start_date}")
+    if end_date:
+        params.append(f"end_date={end_date}")
+    params.append(f"limit={limit}")
+
+    query = "&".join(params)
+    path = f"/api/v1/times?{query}"
+
+    with console.status("Fetching times..."):
+        response = cli_auth.api_request("GET", path)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    times = response.json()
+
+    if not times:
+        console.print("[yellow]No times found[/yellow]")
+        return
+
+    table = Table(title=f"Swim Times ({len(times)})")
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Time", style="cyan bold", no_wrap=True)
+    table.add_column("Swimmer", no_wrap=True)
+    table.add_column("Event", no_wrap=True)
+    table.add_column("Date", no_wrap=True)
+    table.add_column("Round", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+
+    for t in times:
+        status = ""
+        if t.get("dq"):
+            status = "[red]DQ[/red]"
+        elif not t.get("official"):
+            status = "[yellow]Unofficial[/yellow]"
+        else:
+            status = "[green]Official[/green]"
+
+        round_val = t.get("round") or "-"
+
+        table.add_row(
+            t["id"][:8],
+            t.get("time_formatted", "-"),
+            t.get("swimmer_id", "-")[:8],
+            t.get("event_id", "-")[:8],
+            t.get("swim_date", "-"),
+            round_val,
+            status,
+        )
+
+    console.print(table)
+
+
+@times_app.command("get")
+def times_get(
+    time_id: str = typer.Argument(..., help="Swim time ID"),
+):
+    """Get details for a specific swim time."""
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    with console.status("Fetching time..."):
+        response = cli_auth.api_request("GET", f"/api/v1/times/{time_id}")
+
+    if response.status_code == 404:
+        console.print(f"[red]Time not found: {time_id}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    t = response.json()
+
+    table = Table(title="Swim Time Details")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+
+    table.add_row("ID", t["id"])
+    table.add_row("Time", f"[bold]{t.get('time_formatted', '-')}[/bold]")
+    table.add_row("Centiseconds", str(t.get("time_centiseconds", "-")))
+    table.add_row("Swimmer ID", t.get("swimmer_id", "-"))
+    table.add_row("Event ID", t.get("event_id", "-"))
+    table.add_row("Meet ID", t.get("meet_id", "-"))
+    table.add_row("Team ID", t.get("team_id", "-"))
+    table.add_row("Date", t.get("swim_date", "-"))
+    table.add_row("Round", t.get("round") or "-")
+    table.add_row("Lane", str(t.get("lane")) if t.get("lane") else "-")
+    table.add_row("Place", str(t.get("place")) if t.get("place") else "-")
+    table.add_row("Official", "Yes" if t.get("official") else "No")
+    table.add_row("DQ", "Yes" if t.get("dq") else "No")
+    if t.get("dq_reason"):
+        table.add_row("DQ Reason", t["dq_reason"])
+    if t.get("suit_id"):
+        table.add_row("Suit ID", t["suit_id"])
+
+    console.print(table)
+
+
+def _resolve_swimmer_id(swimmer_ref: str) -> str:
+    """Resolve a swimmer reference to an ID.
+
+    Args:
+        swimmer_ref: Either a swimmer ID or name (first, last, or "first last")
+
+    Returns:
+        Swimmer ID
+
+    Raises:
+        typer.Exit: If swimmer not found or ambiguous
+    """
+    import urllib.parse
+
+    # If it looks like an ID (alphanumeric, 8+ chars, no spaces), try direct lookup
+    if swimmer_ref.replace("_", "").isalnum() and len(swimmer_ref) >= 8 and " " not in swimmer_ref:
+        response = cli_auth.api_request("GET", f"/api/v1/swimmers/{swimmer_ref}")
+        if response.status_code == 200:
+            return response.json()["id"]
+
+    # Search by name
+    encoded = urllib.parse.quote(swimmer_ref)
+    response = cli_auth.api_request("GET", f"/api/v1/swimmers?name={encoded}&limit=10")
+
+    if response.status_code != 200:
+        console.print(f"[red]Error searching swimmers: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    swimmers = response.json()
+
+    if not swimmers:
+        console.print(f"[red]No swimmer found matching: {swimmer_ref}[/red]")
+        raise typer.Exit(1)
+
+    if len(swimmers) == 1:
+        swimmer = swimmers[0]
+        console.print(f"[dim]Found swimmer: {swimmer['first_name']} {swimmer['last_name']}[/dim]")
+        return swimmer["id"]
+
+    # Multiple matches - check for exact match first
+    name_lower = swimmer_ref.lower()
+    for s in swimmers:
+        full_name = f"{s['first_name']} {s['last_name']}".lower()
+        if full_name == name_lower:
+            console.print(f"[dim]Found swimmer: {s['first_name']} {s['last_name']}[/dim]")
+            return s["id"]
+
+    # Ambiguous - show options
+    console.print(f"[yellow]Multiple swimmers match '{swimmer_ref}':[/yellow]")
+    for s in swimmers[:5]:
+        console.print(f"  {s['id'][:8]}  {s['first_name']} {s['last_name']}")
+    if len(swimmers) > 5:
+        console.print(f"  ... and {len(swimmers) - 5} more")
+    console.print("[dim]Please use a more specific name or the swimmer ID[/dim]")
+    raise typer.Exit(1)
+
+
+def _resolve_event_id(event_ref: str) -> str:
+    """Resolve an event reference to an ID.
+
+    Args:
+        event_ref: Either an event ID or description like '100 free scy'
+
+    Returns:
+        Event ID
+
+    Raises:
+        typer.Exit: If event not found
+    """
+    import urllib.parse
+
+    # If it looks like an ID (alphanumeric, 6+ chars), try direct lookup first
+    if event_ref.replace("_", "").isalnum() and len(event_ref) >= 6 and " " not in event_ref:
+        response = cli_auth.api_request("GET", f"/api/v1/events/{event_ref}")
+        if response.status_code == 200:
+            return response.json()["id"]
+
+    # Try as description (e.g., "100 free scy")
+    encoded = urllib.parse.quote(event_ref)
+    response = cli_auth.api_request("GET", f"/api/v1/events/lookup/{encoded}")
+
+    if response.status_code == 200:
+        return response.json()["id"]
+
+    if response.status_code == 400:
+        console.print(f"[red]Invalid event format: {event_ref}[/red]")
+        console.print("[dim]Use format: '<distance> <stroke> <course>' e.g., '100 free scy'[/dim]")
+        console.print("[dim]Strokes: free, back, breast, fly, im[/dim]")
+        console.print("[dim]Courses: scy, scm, lcm[/dim]")
+        raise typer.Exit(1)
+
+    if response.status_code == 404:
+        console.print(f"[red]Event not found: {event_ref}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[red]Error looking up event: {response.text}[/red]")
+    raise typer.Exit(1)
+
+
+@times_app.command("create")
+def times_create(
+    swimmer: str = typer.Option(
+        ..., "--swimmer", "-s", help="Swimmer ID or name (e.g., 'John Smith' or 'Smith')"
+    ),
+    event: str = typer.Option(
+        ..., "--event", "-e", help="Event ID or description (e.g., '100 free scy')"
+    ),
+    meet_id: str = typer.Option(..., "--meet", "-m", help="Meet ID"),
+    team_id: str = typer.Option(..., "--team", "-t", help="Team ID"),
+    time: str = typer.Option(..., "--time", help="Time (e.g., '57.65' or '1:23.45')"),
+    date: str = typer.Option(..., "--date", "-d", help="Swim date (YYYY-MM-DD)"),
+    round: str = typer.Option(
+        None, "--round", "-r", help="Round (prelims/finals/consolation/bonus_finals/time_trial)"
+    ),
+    lane: int = typer.Option(None, "--lane", "-l", help="Lane number (1-10)"),
+    place: int = typer.Option(None, "--place", "-p", help="Finish place"),
+    unofficial: bool = typer.Option(False, "--unofficial", help="Mark as unofficial"),
+    dq: bool = typer.Option(False, "--dq", help="Mark as disqualified"),
+    dq_reason: str = typer.Option(None, "--dq-reason", help="DQ reason"),
+    suit_id: str = typer.Option(None, "--suit", help="Suit ID"),
+):
+    """Record a new swim time (coach or admin only).
+
+    Swimmer can be specified by ID or name (first, last, or full name).
+    Event can be specified as an ID or description like '100 free scy'.
+    """
+    try:
+        cli_auth.require_admin_or_coach()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Resolve swimmer to ID
+    with console.status("Looking up swimmer..."):
+        swimmer_id = _resolve_swimmer_id(swimmer)
+
+    # Resolve event to ID
+    with console.status("Looking up event..."):
+        event_id = _resolve_event_id(event)
+
+    # Parse time to centiseconds
+    try:
+        time_cs = _parse_time_to_centiseconds(time)
+    except ValueError as e:
+        console.print(f"[red]Invalid time format: {e}[/red]")
+        console.print("[dim]Use format like '57.65' or '1:23.45'[/dim]")
+        raise typer.Exit(1) from None
+
+    payload = {
+        "swimmer_id": swimmer_id,
+        "event_id": event_id,
+        "meet_id": meet_id,
+        "team_id": team_id,
+        "time_centiseconds": time_cs,
+        "swim_date": date,
+        "official": not unofficial,
+        "dq": dq,
+    }
+
+    if round:
+        payload["round"] = round.lower()
+    if lane:
+        payload["lane"] = lane
+    if place:
+        payload["place"] = place
+    if dq_reason:
+        payload["dq_reason"] = dq_reason
+    if suit_id:
+        payload["suit_id"] = suit_id
+
+    with console.status("Creating time..."):
+        response = cli_auth.api_request("POST", "/api/v1/times", json=payload)
+
+    if response.status_code == 403:
+        console.print("[red]Coach or admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 201:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    result = response.json()
+    console.print(f"[green]Time recorded: {result['time_formatted']}[/green]")
+    console.print(f"[dim]ID: {result['id']}[/dim]")
+
+
+def _parse_time_to_centiseconds(time_str: str) -> int:
+    """Parse a time string to centiseconds.
+
+    Args:
+        time_str: Time like '57.65' or '1:23.45' or '2:03.21'
+
+    Returns:
+        Time in centiseconds
+    """
+    import re
+
+    # Match patterns like "1:23.45" or "57.65"
+    match = re.match(r"^(?:(\d+):)?(\d+)\.(\d{1,2})$", time_str.strip())
+    if not match:
+        raise ValueError(f"Invalid time format: {time_str}")
+
+    minutes = int(match.group(1)) if match.group(1) else 0
+    seconds = int(match.group(2))
+    centiseconds_part = match.group(3).ljust(2, "0")[:2]  # Pad or truncate to 2 digits
+    centiseconds = int(centiseconds_part)
+
+    return (minutes * 60 + seconds) * 100 + centiseconds
+
+
+@times_app.command("update")
+def times_update(
+    time_id: str = typer.Argument(..., help="Swim time ID"),
+    time: str = typer.Option(None, "--time", help="New time (e.g., '57.65' or '1:23.45')"),
+    round: str = typer.Option(None, "--round", "-r", help="Round"),
+    lane: int = typer.Option(None, "--lane", "-l", help="Lane number"),
+    place: int = typer.Option(None, "--place", "-p", help="Finish place"),
+    official: bool = typer.Option(None, "--official/--unofficial", help="Official status"),
+    dq: bool = typer.Option(None, "--dq/--no-dq", help="DQ status"),
+    dq_reason: str = typer.Option(None, "--dq-reason", help="DQ reason"),
+    suit_id: str = typer.Option(None, "--suit", help="Suit ID"),
+):
+    """Update a swim time (coach or admin only)."""
+    try:
+        cli_auth.require_admin_or_coach()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    payload = {}
+
+    if time:
+        try:
+            payload["time_centiseconds"] = _parse_time_to_centiseconds(time)
+        except ValueError as e:
+            console.print(f"[red]Invalid time format: {e}[/red]")
+            raise typer.Exit(1) from None
+
+    if round:
+        payload["round"] = round.lower()
+    if lane is not None:
+        payload["lane"] = lane
+    if place is not None:
+        payload["place"] = place
+    if official is not None:
+        payload["official"] = official
+    if dq is not None:
+        payload["dq"] = dq
+    if dq_reason:
+        payload["dq_reason"] = dq_reason
+    if suit_id:
+        payload["suit_id"] = suit_id
+
+    if not payload:
+        console.print("[yellow]No updates specified[/yellow]")
+        raise typer.Exit(0)
+
+    with console.status("Updating time..."):
+        response = cli_auth.api_request("PATCH", f"/api/v1/times/{time_id}", json=payload)
+
+    if response.status_code == 403:
+        console.print("[red]Coach or admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code == 404:
+        console.print(f"[red]Time not found: {time_id}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    result = response.json()
+    console.print(f"[green]Time updated: {result['time_formatted']}[/green]")
+
+
+@times_app.command("delete")
+def times_delete(
+    time_id: str = typer.Argument(..., help="Swim time ID"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a swim time (admin only)."""
+    try:
+        cli_auth.require_admin()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Fetch time first to show what we're deleting
+    with console.status("Fetching time..."):
+        response = cli_auth.api_request("GET", f"/api/v1/times/{time_id}")
+
+    if response.status_code == 404:
+        console.print(f"[red]Time not found: {time_id}[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 200:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    t = response.json()
+
+    if not force and not typer.confirm(
+        f"Delete time {t['time_formatted']} (ID: {time_id[:8]})?"
+    ):
+        console.print("[yellow]Cancelled[/yellow]")
+        raise typer.Exit(0)
+
+    with console.status("Deleting time..."):
+        response = cli_auth.api_request("DELETE", f"/api/v1/times/{time_id}")
+
+    if response.status_code == 403:
+        console.print("[red]Admin access required[/red]")
+        raise typer.Exit(1)
+
+    if response.status_code != 204:
+        console.print(f"[red]Error: {response.text}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Time {t['time_formatted']} deleted[/green]")
+
+
+# =============================================================================
+# IMPORT COMMANDS
+# =============================================================================
+
+import_app = typer.Typer(help="Import swim data from CSV files", no_args_is_help=True)
+app.add_typer(import_app, name="import")
+
+
+def _display_validation_result(result) -> None:
+    """Display validation errors and warnings."""
+    if result.errors:
+        console.print(f"\n[red]Validation Errors ({len(result.errors)}):[/red]")
+        for err in result.errors[:10]:
+            console.print(f"  Row {err.row_number}: {err.field} - {err.message}")
+        if len(result.errors) > 10:
+            console.print(f"  [dim]... and {len(result.errors) - 10} more errors[/dim]")
+
+    if result.warnings:
+        console.print(f"\n[yellow]Warnings ({len(result.warnings)}):[/yellow]")
+        for warn in result.warnings[:5]:
+            console.print(f"  Row {warn.row_number}: {warn.field} - {warn.message}")
+        if len(result.warnings) > 5:
+            console.print(f"  [dim]... and {len(result.warnings) - 5} more warnings[/dim]")
+
+
+def _display_import_result(result, entity_name: str) -> None:
+    """Display import results."""
+    console.print()
+    if result.created_count > 0:
+        console.print(f"[green]Created {result.created_count} {entity_name}[/green]")
+    if result.updated_count > 0:
+        console.print(f"[cyan]Updated {result.updated_count} {entity_name}[/cyan]")
+    if result.skipped_count > 0:
+        console.print(f"[yellow]Skipped {result.skipped_count} {entity_name}[/yellow]")
+    if result.error_count > 0:
+        console.print(f"[red]Errors: {result.error_count}[/red]")
+        for err in result.errors[:5]:
+            console.print(f"  Row {err.row_number}: {err.field} - {err.message}")
+        if len(result.errors) > 5:
+            console.print(f"  [dim]... and {len(result.errors) - 5} more[/dim]")
+
+
+@import_app.command("roster")
+def import_roster(
+    csv_path: Path = typer.Argument(..., help="Path to roster CSV file"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only, don't import"),
+):
+    """Import swimmers from a roster CSV file.
+
+    Expected columns: first_name, last_name, date_of_birth, gender, usa_swimming_id
+
+    Example:
+        swimcuttimes import roster swimmers.csv
+        swimcuttimes import roster swimmers.csv --dry-run
+    """
+    from swimcuttimes.services import ImportService
+
+    if not csv_path.exists():
+        console.print(f"[red]File not found: {csv_path}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    service = ImportService()
+
+    # Parse CSV
+    console.print(f"[cyan]Parsing:[/cyan] {csv_path}")
+    rows, parse_errors = service.parse_roster_csv(csv_path)
+
+    if parse_errors:
+        console.print(f"[red]Parse errors ({len(parse_errors)}):[/red]")
+        for err in parse_errors[:5]:
+            console.print(f"  Row {err.row_number}: {err.message}")
+        if len(parse_errors) > 5:
+            console.print(f"  [dim]... and {len(parse_errors) - 5} more[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Parsed {len(rows)} rows[/green]")
+
+    # Validate
+    console.print("\n[cyan]Validating...[/cyan]")
+    validation = service.validate_roster(rows)
+    _display_validation_result(validation)
+
+    if not validation.valid:
+        console.print("\n[red]Validation failed. Fix errors and retry.[/red]")
+        raise typer.Exit(1)
+
+    # Preview
+    console.print("\n[cyan]Preview:[/cyan]")
+    preview_table = Table()
+    preview_table.add_column("Row", style="dim")
+    preview_table.add_column("Name")
+    preview_table.add_column("DOB")
+    preview_table.add_column("Gender")
+    preview_table.add_column("USA Swimming ID")
+
+    for row in rows[:15]:
+        preview_table.add_row(
+            str(row.row_number),
+            f"{row.first_name} {row.last_name}",
+            str(row.date_of_birth),
+            row.gender,
+            row.usa_swimming_id or "-",
+        )
+    console.print(preview_table)
+
+    if len(rows) > 15:
+        console.print(f"[dim]... and {len(rows) - 15} more rows[/dim]")
+
+    if dry_run:
+        console.print("\n[yellow]Dry run - no changes made[/yellow]")
+        raise typer.Exit(0)
+
+    # Confirm
+    if not typer.confirm(f"\nImport {len(rows)} swimmers?"):
+        console.print("[yellow]Cancelled[/yellow]")
+        raise typer.Exit(0)
+
+    # Import
+    with console.status("Importing swimmers..."):
+        result = service.import_roster(rows)
+
+    _display_import_result(result, "swimmers")
+
+
+@import_app.command("meets")
+def import_meets(
+    csv_path: Path = typer.Argument(..., help="Path to meets CSV file"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only, don't import"),
+):
+    """Import meets from a CSV file.
+
+    Expected columns: name, location, city, state, start_date, end_date, course,
+                      sanctioning_body, meet_type, lanes, indoor
+
+    Example:
+        swimcuttimes import meets meets.csv
+        swimcuttimes import meets meets.csv --dry-run
+    """
+    from swimcuttimes.services import ImportService
+
+    if not csv_path.exists():
+        console.print(f"[red]File not found: {csv_path}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    service = ImportService()
+
+    # Parse CSV
+    console.print(f"[cyan]Parsing:[/cyan] {csv_path}")
+    rows, parse_errors = service.parse_meets_csv(csv_path)
+
+    if parse_errors:
+        console.print(f"[red]Parse errors ({len(parse_errors)}):[/red]")
+        for err in parse_errors[:5]:
+            console.print(f"  Row {err.row_number}: {err.message}")
+        if len(parse_errors) > 5:
+            console.print(f"  [dim]... and {len(parse_errors) - 5} more[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Parsed {len(rows)} rows[/green]")
+
+    # Validate
+    console.print("\n[cyan]Validating...[/cyan]")
+    validation = service.validate_meets(rows)
+    _display_validation_result(validation)
+
+    if not validation.valid:
+        console.print("\n[red]Validation failed. Fix errors and retry.[/red]")
+        raise typer.Exit(1)
+
+    # Preview
+    console.print("\n[cyan]Preview:[/cyan]")
+    preview_table = Table()
+    preview_table.add_column("Row", style="dim")
+    preview_table.add_column("Name")
+    preview_table.add_column("Date")
+    preview_table.add_column("Location")
+    preview_table.add_column("Course")
+
+    for row in rows[:15]:
+        preview_table.add_row(
+            str(row.row_number),
+            row.name,
+            str(row.start_date),
+            f"{row.city}, {row.state or 'USA'}",
+            row.course.upper(),
+        )
+    console.print(preview_table)
+
+    if len(rows) > 15:
+        console.print(f"[dim]... and {len(rows) - 15} more rows[/dim]")
+
+    if dry_run:
+        console.print("\n[yellow]Dry run - no changes made[/yellow]")
+        raise typer.Exit(0)
+
+    # Confirm
+    if not typer.confirm(f"\nImport {len(rows)} meets?"):
+        console.print("[yellow]Cancelled[/yellow]")
+        raise typer.Exit(0)
+
+    # Import
+    with console.status("Importing meets..."):
+        result = service.import_meets(rows)
+
+    _display_import_result(result, "meets")
+
+
+@import_app.command("times")
+def import_times(
+    csv_path: Path = typer.Argument(..., help="Path to times CSV file"),
+    roster_path: Path = typer.Option(None, "--roster", "-r", help="Roster CSV for validation"),
+    meets_path: Path = typer.Option(None, "--meets", "-m", help="Meets CSV for validation"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only, don't import"),
+):
+    """Import swim times from a CSV file.
+
+    Expected columns: swimmer_first_name, swimmer_last_name, usa_swimming_id,
+                      distance, stroke, course, meet_name, time, splits, swim_date,
+                      team_name, round, lane, place
+
+    Splits format: "50:28.27;100:58.44;150:1:29.19" (distance:time pairs)
+
+    Example:
+        swimcuttimes import times results.csv
+        swimcuttimes import times results.csv --roster swimmers.csv --meets meets.csv
+        swimcuttimes import times results.csv --dry-run
+    """
+    from swimcuttimes.services import ImportService
+
+    if not csv_path.exists():
+        console.print(f"[red]File not found: {csv_path}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    service = ImportService()
+
+    # Parse times CSV
+    console.print(f"[cyan]Parsing times:[/cyan] {csv_path}")
+    rows, parse_errors = service.parse_times_csv(csv_path)
+
+    if parse_errors:
+        console.print(f"[red]Parse errors ({len(parse_errors)}):[/red]")
+        for err in parse_errors[:5]:
+            console.print(f"  Row {err.row_number}: {err.message}")
+        if len(parse_errors) > 5:
+            console.print(f"  [dim]... and {len(parse_errors) - 5} more[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Parsed {len(rows)} rows[/green]")
+
+    # Optionally load roster and meets for cross-validation
+    roster = None
+    meets = None
+
+    if roster_path:
+        if not roster_path.exists():
+            console.print(f"[red]Roster file not found: {roster_path}[/red]")
+            raise typer.Exit(1)
+        console.print(f"[cyan]Loading roster:[/cyan] {roster_path}")
+        roster, roster_errors = service.parse_roster_csv(roster_path)
+        if roster_errors:
+            console.print(f"[yellow]Warning: {len(roster_errors)} roster parse errors[/yellow]")
+
+    if meets_path:
+        if not meets_path.exists():
+            console.print(f"[red]Meets file not found: {meets_path}[/red]")
+            raise typer.Exit(1)
+        console.print(f"[cyan]Loading meets:[/cyan] {meets_path}")
+        meets, meets_errors = service.parse_meets_csv(meets_path)
+        if meets_errors:
+            console.print(f"[yellow]Warning: {len(meets_errors)} meets parse errors[/yellow]")
+
+    # Validate
+    console.print("\n[cyan]Validating...[/cyan]")
+    validation = service.validate_times(rows, roster, meets)
+    _display_validation_result(validation)
+
+    if not validation.valid:
+        console.print("\n[red]Validation failed. Fix errors and retry.[/red]")
+        raise typer.Exit(1)
+
+    # Preview
+    console.print("\n[cyan]Preview:[/cyan]")
+    preview_table = Table()
+    preview_table.add_column("Row", style="dim")
+    preview_table.add_column("Swimmer")
+    preview_table.add_column("Event")
+    preview_table.add_column("Time")
+    preview_table.add_column("Meet")
+
+    for row in rows[:15]:
+        swimmer = row.usa_swimming_id or f"{row.swimmer_first_name} {row.swimmer_last_name}"
+        preview_table.add_row(
+            str(row.row_number),
+            swimmer,
+            row.get_event_string(),
+            row.time,
+            row.meet_name[:30] + "..." if len(row.meet_name) > 30 else row.meet_name,
+        )
+    console.print(preview_table)
+
+    if len(rows) > 15:
+        console.print(f"[dim]... and {len(rows) - 15} more rows[/dim]")
+
+    if dry_run:
+        console.print("\n[yellow]Dry run - no changes made[/yellow]")
+        raise typer.Exit(0)
+
+    # Confirm
+    if not typer.confirm(f"\nImport {len(rows)} times?"):
+        console.print("[yellow]Cancelled[/yellow]")
+        raise typer.Exit(0)
+
+    # Import
+    with console.status("Importing times...") as status:
+        result = service.import_times(rows)
+
+    _display_import_result(result, "times")
+
+
+@import_app.command("all")
+def import_all(
+    directory: Path = typer.Argument(..., help="Directory containing CSV files"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only, don't import"),
+):
+    """Import all CSV files from a directory.
+
+    Looks for: roster.csv, meets.csv, times.csv
+
+    Example:
+        swimcuttimes import all ./meet-data/
+        swimcuttimes import all ./meet-data/ --dry-run
+    """
+    from swimcuttimes.services import ImportService
+
+    if not directory.is_dir():
+        console.print(f"[red]Not a directory: {directory}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        cli_auth.require_auth()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    roster_path = directory / "roster.csv"
+    meets_path = directory / "meets.csv"
+    times_path = directory / "times.csv"
+
+    service = ImportService()
+
+    # Step 1: Import roster (if exists)
+    roster = None
+    if roster_path.exists():
+        console.print(f"\n[bold cyan]Step 1: Importing roster[/bold cyan]")
+        rows, parse_errors = service.parse_roster_csv(roster_path)
+        if parse_errors:
+            console.print(f"[red]Parse errors in roster.csv[/red]")
+            raise typer.Exit(1)
+
+        validation = service.validate_roster(rows)
+        if not validation.valid:
+            _display_validation_result(validation)
+            raise typer.Exit(1)
+
+        roster = rows
+        console.print(f"[green]Validated {len(rows)} swimmers[/green]")
+
+        if not dry_run:
+            result = service.import_roster(rows)
+            _display_import_result(result, "swimmers")
+    else:
+        console.print(f"[yellow]No roster.csv found in {directory}[/yellow]")
+
+    # Step 2: Import meets (if exists)
+    meets = None
+    if meets_path.exists():
+        console.print(f"\n[bold cyan]Step 2: Importing meets[/bold cyan]")
+        rows, parse_errors = service.parse_meets_csv(meets_path)
+        if parse_errors:
+            console.print(f"[red]Parse errors in meets.csv[/red]")
+            raise typer.Exit(1)
+
+        validation = service.validate_meets(rows)
+        if not validation.valid:
+            _display_validation_result(validation)
+            raise typer.Exit(1)
+
+        meets = rows
+        console.print(f"[green]Validated {len(rows)} meets[/green]")
+
+        if not dry_run:
+            result = service.import_meets(rows)
+            _display_import_result(result, "meets")
+    else:
+        console.print(f"[yellow]No meets.csv found in {directory}[/yellow]")
+
+    # Step 3: Import times (if exists)
+    if times_path.exists():
+        console.print(f"\n[bold cyan]Step 3: Importing times[/bold cyan]")
+        rows, parse_errors = service.parse_times_csv(times_path)
+        if parse_errors:
+            console.print(f"[red]Parse errors in times.csv[/red]")
+            raise typer.Exit(1)
+
+        validation = service.validate_times(rows, roster, meets)
+        if not validation.valid:
+            _display_validation_result(validation)
+            raise typer.Exit(1)
+
+        console.print(f"[green]Validated {len(rows)} times[/green]")
+
+        if not dry_run:
+            result = service.import_times(rows)
+            _display_import_result(result, "times")
+    else:
+        console.print(f"[yellow]No times.csv found in {directory}[/yellow]")
+
+    if dry_run:
+        console.print("\n[yellow]Dry run complete - no changes made[/yellow]")
+    else:
+        console.print("\n[green]Import complete![/green]")
+
+
+@import_app.command("templates")
+def import_templates(
+    output_dir: Path = typer.Argument(..., help="Directory to write template files"),
+):
+    """Generate blank CSV templates for data import.
+
+    Creates roster.csv, meets.csv, and times.csv templates with headers
+    and example data.
+
+    Example:
+        swimcuttimes import templates ./templates/
+    """
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True)
+
+    # Roster template
+    roster_content = """first_name,last_name,date_of_birth,gender,usa_swimming_id
+# Example rows (remove these and add your data):
+Emily,Johnson,2011-03-15,F,123456789
+Michael,Smith,2010-08-22,M,
+Sarah,Williams,2012-01-08,F,987654321
+"""
+    roster_path = output_dir / "roster.csv"
+    roster_path.write_text(roster_content)
+    console.print(f"[green]Created:[/green] {roster_path}")
+
+    # Meets template
+    meets_content = """name,location,city,state,start_date,end_date,course,sanctioning_body,meet_type,lanes,indoor
+# Example rows (remove these and add your data):
+2024 Summer Championship,Harvard Pool,Boston,MA,2024-07-15,2024-07-17,lcm,NE Swimming,championship,8,true
+Winter Invitational,YMCA Pool,Cambridge,MA,2024-01-20,,scy,USA Swimming,invitational,6,true
+"""
+    meets_path = output_dir / "meets.csv"
+    meets_path.write_text(meets_content)
+    console.print(f"[green]Created:[/green] {meets_path}")
+
+    # Times template
+    times_content = """swimmer_first_name,swimmer_last_name,usa_swimming_id,distance,stroke,course,meet_name,time,splits,swim_date,team_name,round,lane,place,official,dq,dq_reason
+# Example rows (remove these and add your data):
+Emily,Johnson,123456789,100,free,scy,2024 Summer Championship,59.45,,2024-07-15,Bluefish SC,finals,4,2,true,false,
+Emily,Johnson,123456789,200,im,scy,2024 Summer Championship,2:18.32,"50:30.12;100:1:05.45;150:1:42.18",2024-07-16,Bluefish SC,prelims,,,true,false,
+Michael,Smith,,50,back,scy,Winter Invitational,28.76,,2024-01-20,Bluefish SC,finals,5,1,true,false,
+"""
+    times_path = output_dir / "times.csv"
+    times_path.write_text(times_content)
+    console.print(f"[green]Created:[/green] {times_path}")
+
+    console.print(f"\n[cyan]Templates created in {output_dir}[/cyan]")
+    console.print("[dim]Edit the files to add your data, then use:[/dim]")
+    console.print(f"  swimcuttimes import all {output_dir}")
 
 
 def main():

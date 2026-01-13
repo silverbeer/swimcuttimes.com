@@ -30,6 +30,87 @@ class MeetDAO(BaseDAO[Meet]):
         result = self.table.select("*").ilike("name", f"%{name}%").execute()
         return [self._to_model(row) for row in result.data]
 
+    def find_by_name_and_date(self, name: str, start_date: date) -> Meet | None:
+        """Find a meet by exact name and start date.
+
+        Args:
+            name: Exact meet name (case-insensitive)
+            start_date: The meet start date
+
+        Returns:
+            The Meet or None if not found
+        """
+        result = (
+            self.table.select("*")
+            .ilike("name", name)
+            .eq("start_date", start_date.isoformat())
+            .execute()
+        )
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
+
+    def find_or_create(
+        self,
+        name: str,
+        start_date: date,
+        location: str,
+        city: str,
+        course: Course,
+        sanctioning_body: str,
+        meet_type: MeetType,
+        state: str | None = None,
+        country: str = "USA",
+        end_date: date | None = None,
+        lanes: int = 8,
+        indoor: bool = True,
+    ) -> tuple[Meet, bool]:
+        """Find an existing meet or create a new one.
+
+        Matching is done by name + start_date (unique enough for meets).
+
+        Args:
+            name: Meet name
+            start_date: Meet start date
+            location: Venue name
+            city: City
+            course: Pool course type
+            sanctioning_body: Sanctioning organization
+            meet_type: Type of meet
+            state: State abbreviation (optional)
+            country: Country code (default USA)
+            end_date: End date for multi-day meets (optional)
+            lanes: Number of lanes (default 8)
+            indoor: Indoor vs outdoor (default True)
+
+        Returns:
+            Tuple of (meet, was_created) where was_created is True if new
+        """
+        # Try to find existing meet
+        existing = self.find_by_name_and_date(name, start_date)
+        if existing:
+            return (existing, False)
+
+        # Create new meet
+        new_meet = Meet(
+            name=name,
+            start_date=start_date,
+            end_date=end_date,
+            location=location,
+            city=city,
+            state=state,
+            country=country,
+            course=course,
+            lanes=lanes,
+            indoor=indoor,
+            sanctioning_body=sanctioning_body,
+            meet_type=meet_type,
+        )
+        created = self.create(new_meet)
+        return (created, True)
+
     def find_by_date_range(self, start: date, end: date) -> list[Meet]:
         """Find meets within a date range.
 

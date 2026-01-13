@@ -250,12 +250,158 @@ class SwimTimeDAO(BaseDAO[SwimTime]):
         )
         return [self._to_model(row) for row in result.data]
 
+    def partial_update(self, id: str, updates: dict) -> SwimTime | None:
+        """Update specific fields of a swim time.
+
+        Args:
+            id: Swim time ID (short ID string)
+            updates: Dictionary of field names to new values
+
+        Returns:
+            Updated SwimTime or None if not found
+        """
+        # Filter out None values
+        data = {k: v for k, v in updates.items() if v is not None}
+
+        if not data:
+            # No updates provided, return current swim time
+            return self.get_by_id(id)
+
+        result = self.table.update(data).eq("id", id).execute()
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
+
+    def find_existing(
+        self,
+        swimmer_id: str,
+        event_id: str,
+        meet_id: str,
+        swim_date: date,
+        round: Round | None = None,
+    ) -> SwimTime | None:
+        """Find an existing swim time by unique combination.
+
+        Uniqueness key: swimmer + event + meet + date + round
+
+        Args:
+            swimmer_id: Swimmer's ID
+            event_id: Event's ID
+            meet_id: Meet's ID
+            swim_date: Date of the swim
+            round: Round of competition (optional)
+
+        Returns:
+            The SwimTime or None if not found
+        """
+        query = (
+            self.table.select("*")
+            .eq("swimmer_id", str(swimmer_id))
+            .eq("event_id", str(event_id))
+            .eq("meet_id", str(meet_id))
+            .eq("swim_date", swim_date.isoformat())
+        )
+
+        if round:
+            query = query.eq("round", round.value)
+        else:
+            query = query.is_("round", "null")
+
+        result = query.execute()
+
+        if not result.data:
+            return None
+
+        return self._to_model(result.data[0])
+
+    def upsert(
+        self,
+        swimmer_id: str,
+        event_id: str,
+        meet_id: str,
+        team_id: str,
+        time_centiseconds: int,
+        swim_date: date,
+        round: Round | None = None,
+        lane: int | None = None,
+        place: int | None = None,
+        official: bool = True,
+        dq: bool = False,
+        dq_reason: str | None = None,
+        suit_id: str | None = None,
+    ) -> tuple[SwimTime, str]:
+        """Create or update a swim time.
+
+        If a time exists for the same swimmer/event/meet/date/round,
+        it will be updated. Otherwise, a new time is created.
+
+        Args:
+            swimmer_id: Swimmer's ID
+            event_id: Event's ID
+            meet_id: Meet's ID
+            team_id: Team's ID
+            time_centiseconds: Time in centiseconds
+            swim_date: Date of the swim
+            round: Round of competition
+            lane: Lane number
+            place: Finish place
+            official: Whether official time
+            dq: Whether disqualified
+            dq_reason: DQ reason
+            suit_id: Racing suit ID
+
+        Returns:
+            Tuple of (swim_time, action) where action is "created" or "updated"
+        """
+        # Check for existing time
+        existing = self.find_existing(swimmer_id, event_id, meet_id, swim_date, round)
+
+        if existing:
+            # Update existing time
+            updates = {
+                "team_id": str(team_id),
+                "time_centiseconds": time_centiseconds,
+                "lane": lane,
+                "place": place,
+                "official": official,
+                "dq": dq,
+                "dq_reason": dq_reason,
+            }
+            if suit_id:
+                updates["suit_id"] = str(suit_id)
+            if round:
+                updates["round"] = round.value
+
+            result = self.table.update(updates).eq("id", existing.id).execute()
+            return (self._to_model(result.data[0]), "updated")
+
+        # Create new time
+        new_time = SwimTime(
+            swimmer_id=swimmer_id,
+            event_id=event_id,
+            meet_id=meet_id,
+            team_id=team_id,
+            time_centiseconds=time_centiseconds,
+            swim_date=swim_date,
+            round=round,
+            lane=lane,
+            place=place,
+            official=official,
+            dq=dq,
+            dq_reason=dq_reason,
+            suit_id=suit_id,
+        )
+        created = self.create(new_time)
+        return (created, "created")
+
     def search(
         self,
-        swimmer_id: UUID | None = None,
-        event_id: UUID | None = None,
-        meet_id: UUID | None = None,
-        team_id: UUID | None = None,
+        swimmer_id: str | None = None,
+        event_id: str | None = None,
+        meet_id: str | None = None,
+        team_id: str | None = None,
         round: Round | None = None,
         official_only: bool = True,
         exclude_dq: bool = True,
@@ -307,14 +453,14 @@ class SwimTimeDAO(BaseDAO[SwimTime]):
     def _to_model(self, row: dict) -> SwimTime:
         """Convert database row to SwimTime model."""
         return SwimTime(
-            id=UUID(row["id"]) if row.get("id") else None,
-            swimmer_id=UUID(row["swimmer_id"]),
-            event_id=UUID(row["event_id"]),
-            meet_id=UUID(row["meet_id"]),
+            id=row["id"] if row.get("id") else None,  # Short ID (TEXT), not UUID
+            swimmer_id=row["swimmer_id"],  # Short ID (TEXT), not UUID
+            event_id=row["event_id"],  # Short ID (TEXT), not UUID
+            meet_id=row["meet_id"],  # Short ID (TEXT), not UUID
             time_centiseconds=row["time_centiseconds"],
             swim_date=date.fromisoformat(row["swim_date"]),
-            team_id=UUID(row["team_id"]),
-            suit_id=UUID(row["suit_id"]) if row.get("suit_id") else None,
+            team_id=row["team_id"],  # Short ID (TEXT), not UUID
+            suit_id=row["suit_id"] if row.get("suit_id") else None,  # Short ID (TEXT), not UUID
             round=Round(row["round"]) if row.get("round") else None,
             lane=row.get("lane"),
             place=row.get("place"),

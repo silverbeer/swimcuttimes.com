@@ -1,0 +1,5 @@
+swimmer_first_name,swimmer_last_name,usa_swimming_id,distance,stroke,course,meet_name,time,splits,swim_date,team_name,round,lane,place,official,dq,dq_reason
+# Example rows (remove these and add your data):
+Emily,Johnson,123456789,100,free,scy,2024 Summer Championship,59.45,,2024-07-15,Bluefish SC,finals,4,2,true,false,
+Emily,Johnson,123456789,200,im,scy,2024 Summer Championship,2:18.32,"50:30.12;100:1:05.45;150:1:42.18",2024-07-16,Bluefish SC,prelims,,,true,false,
+Michael,Smith,,50,back,scy,Winter Invitational,28.76,,2024-01-20,Bluefish SC,finals,5,1,true,false,
